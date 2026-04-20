@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
-from pathlib import Path
 from typing import Iterable
 from urllib.error import URLError
 from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
@@ -12,8 +11,6 @@ import numpy as np
 import pandas as pd
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-DATA_DIR = ROOT_DIR / "data"
 GGDATA_MIDDLE_CATEGORY_CSV_URL = (
     "https://data.gg.go.kr/portal/data/sheet/downloadSheetData.do"
     "?downloadType=C&infId=21P6SA4OOH5AW25V3QRP38272636&infSeq=1"
@@ -120,11 +117,6 @@ class LoadResult:
     original_columns: list[str]
 
 
-def list_csv_files() -> list[Path]:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return sorted(DATA_DIR.glob("*.csv"))
-
-
 def read_csv_bytes(content: bytes, source_name: str) -> pd.DataFrame:
     encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
     last_error: Exception | None = None
@@ -136,10 +128,6 @@ def read_csv_bytes(content: bytes, source_name: str) -> pd.DataFrame:
     if last_error:
         raise last_error
     raise ValueError(f"CSV 파일을 읽을 수 없습니다: {source_name}")
-
-
-def read_csv_path(path: Path) -> pd.DataFrame:
-    return read_csv_bytes(path.read_bytes(), path.name)
 
 
 def download_ggdata_middle_category_csv() -> bytes:
@@ -164,7 +152,7 @@ def download_ggdata_middle_category_csv() -> bytes:
     if _looks_like_block_page(content):
         raise RuntimeError(
             "경기데이터드림이 서버 측 자동 다운로드를 차단했습니다. "
-            "Open API 요청주소가 공개되지 않은 데이터셋이라 현재는 CSV 업로드 방식을 사용해야 합니다."
+            "Open API 요청주소가 공개되지 않은 데이터셋이라 현재 자동 수집을 진행할 수 없습니다."
         )
     return content
 
@@ -227,49 +215,6 @@ def build_load_result(df: pd.DataFrame, source_name: str) -> LoadResult:
         missing_required=missing,
         original_columns=[str(col) for col in df.columns],
     )
-
-
-def sample_data() -> pd.DataFrame:
-    rows = []
-    months = pd.period_range("2025-01", "2025-12", freq="M")
-    regions = ["수원시 영통구", "성남시 분당구", "부천시", "화성시", "고양시 덕양구", "김포시"]
-    industries = ["음식", "유통", "의료", "교육", "문화/여가", "생활서비스"]
-    rng = np.random.default_rng(20260420)
-
-    for m_idx, month in enumerate(months):
-        month_factor = 1 + m_idx * 0.025
-        for r_idx, region in enumerate(regions):
-            region_factor = 1 + r_idx * 0.08
-            for i_idx, industry in enumerate(industries):
-                industry_factor = 1 + i_idx * 0.11
-                noise = rng.normal(1, 0.05)
-                amount = 120_000_000 * month_factor * region_factor * industry_factor * noise
-                rows.append(
-                    {
-                        "기준년월": month.strftime("%Y%m"),
-                        "읍면동코드": f"41{r_idx + 1000}",
-                        "읍면동명": region,
-                        "중분류업종코드": f"I{i_idx + 1:02d}",
-                        "중분류업종명": industry,
-                        "매출금액": round(float(amount)),
-                    }
-                )
-    df = pd.DataFrame(rows)
-    df["전월대비증감값"] = (
-        df.sort_values("기준년월")
-        .groupby(["읍면동코드", "중분류업종코드"])["매출금액"]
-        .diff()
-    )
-    df["전월대비증감률"] = (
-        df["전월대비증감값"]
-        / (
-            df.sort_values("기준년월")
-            .groupby(["읍면동코드", "중분류업종코드"])["매출금액"]
-            .shift(1)
-        )
-        * 100
-    )
-    return df
 
 
 def aggregate_by(

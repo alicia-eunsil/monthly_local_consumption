@@ -2,6 +2,6 @@
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
-data/*.parquet
-data/*.db
-data/*.sqlite
+*.parquet
+*.db
+*.sqlite

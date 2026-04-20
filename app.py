@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import altair as alt
 import pandas as pd
 import streamlit as st
 
 from src.data import (
     build_load_result,
-    list_csv_files,
     period_change,
     read_csv_bytes,
-    read_csv_path,
     download_ggdata_middle_category_csv,
-    sample_data,
 )
 from src.settings import get_access_code, get_app_key
 
@@ -66,24 +61,6 @@ def require_access_code() -> None:
             st.rerun()
         st.error("Invalid access code.")
     st.stop()
-
-
-@st.cache_data(show_spinner=False)
-def _load_path_cached(path_text: str, modified_ns: int):
-    path = Path(path_text)
-    raw = read_csv_path(path)
-    return build_load_result(raw, path.name)
-
-
-@st.cache_data(show_spinner=False)
-def _load_upload_cached(content: bytes, source_name: str):
-    raw = read_csv_bytes(content, source_name)
-    return build_load_result(raw, source_name)
-
-
-@st.cache_data(show_spinner=False)
-def _load_sample_cached():
-    return build_load_result(sample_data(), "샘플 데이터")
 
 
 @st.cache_data(show_spinner=False, ttl=60 * 60 * 6)
@@ -181,48 +158,14 @@ with st.sidebar:
     if app_key:
         st.success("APP_KEY 설정됨")
     else:
-        st.info("CSV 모드는 APP_KEY 없이 사용할 수 있습니다.")
+        st.info("현재 데이터셋은 공식 CSV 다운로드로 불러옵니다.")
 
-    csv_files = list_csv_files()
-    uploaded = st.file_uploader("CSV 업로드", type=["csv"])
-
-    if uploaded is not None:
-        source_type = "업로드 CSV"
-    elif csv_files:
-        source_type = "data 폴더 CSV"
-    elif app_key:
-        source_type = "경기데이터드림 CSV"
-    else:
-        source_type = "경기데이터드림 CSV"
-
-    source_type = st.radio(
-        "데이터 소스",
-        ["경기데이터드림 CSV", "업로드 CSV", "data 폴더 CSV", "샘플 데이터"],
-        index=["경기데이터드림 CSV", "업로드 CSV", "data 폴더 CSV", "샘플 데이터"].index(source_type),
-    )
-
-    load_result = None
-    if source_type == "경기데이터드림 CSV":
-        with st.spinner("경기데이터드림 CSV를 불러오는 중입니다."):
-            try:
-                load_result = _load_ggdata_csv_cached()
-            except Exception as exc:  # noqa: BLE001
-                st.error(str(exc))
-                st.info("포털 다운로드가 막히면 CSV 업로드 또는 data 폴더 CSV 방식을 사용하세요.")
-                st.stop()
-    elif source_type == "업로드 CSV":
-        if uploaded is None:
-            st.info("CSV 파일을 업로드하세요.")
-            st.stop()
-        load_result = _load_upload_cached(uploaded.getvalue(), uploaded.name)
-    elif source_type == "data 폴더 CSV":
-        if not csv_files:
-            st.info("data 폴더에 CSV 파일을 넣어주세요.")
-            st.stop()
-        selected_file = st.selectbox("파일", csv_files, format_func=lambda p: p.name)
-        load_result = _load_path_cached(str(selected_file), selected_file.stat().st_mtime_ns)
-    else:
-        load_result = _load_sample_cached()
+with st.spinner("경기데이터드림 데이터를 불러오는 중입니다."):
+    try:
+        load_result = _load_ggdata_csv_cached()
+    except Exception as exc:  # noqa: BLE001
+        st.error(str(exc))
+        st.stop()
 
 df = load_result.frame
 if load_result.missing_required:
@@ -237,8 +180,6 @@ if df.empty:
 
 with st.sidebar:
     st.caption(f"소스: {load_result.source_name}")
-    if load_result.source_name == "샘플 데이터":
-        st.warning("현재 화면은 샘플 데이터 기준입니다.")
 
     period_options = sorted(df["period_key"].dropna().unique(), reverse=True)
     selected_period = st.selectbox("기준년월", period_options)
