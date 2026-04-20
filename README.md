@@ -26,26 +26,6 @@ streamlit run app.py
 
 - `RegionMnyPublctUse`: 지역화폐 발행 및 이용 현황
 
-## APP_KEY 설정
-
-현재 앱은 경기데이터드림 Open API를 데이터 소스로 사용합니다. `APP_KEY`는 필수입니다.
-
-Streamlit Cloud에서는 App settings > Secrets 또는 Environment variables에 다음 값을 설정하세요.
-
-```toml
-APP_KEY = "YOUR_GGDATA_APP_KEY"
-ACCESS_CODE = "YOUR_ACCESS_CODE"
-```
-
-로컬 PowerShell에서는:
-
-```powershell
-$env:APP_KEY="YOUR_GGDATA_APP_KEY"
-$env:ACCESS_CODE="YOUR_ACCESS_CODE"
-streamlit run app.py
-```
-
-`ACCESS_CODE`가 설정되어 있으면 앱 첫 화면에서 접속코드를 요구합니다. 설정하지 않으면 접속코드 없이 실행됩니다.
 
 ## 화면 구성
 
