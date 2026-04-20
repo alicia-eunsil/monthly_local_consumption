@@ -96,6 +96,26 @@ def fmt_million_money(value: float) -> str:
     return fmt_money(float(value) * 1_000_000)
 
 
+def fmt_delta_million(value: float) -> str:
+    if pd.isna(value):
+        return "-"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{fmt_million_money(value)}"
+
+
+def fmt_pct(value: float) -> str:
+    if pd.isna(value):
+        return "-"
+    return f"{value:+,.1f}%"
+
+
+def fmt_delta_count(value: float) -> str:
+    if pd.isna(value):
+        return "-"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:,.0f}명"
+
+
 def chart_bar(
     frame: pd.DataFrame,
     x_col: str,
@@ -134,6 +154,114 @@ def trend_line(frame: pd.DataFrame, y_col: str, title: str, y_title: str, color:
             ],
         )
         .properties(height=330)
+    )
+
+
+def add_yoy_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.sort_values("period_date").copy()
+    for col in ["new_member_count", "charge_amount_million", "use_amount_million"]:
+        prev = out[col].shift(12)
+        out[f"{col}_yoy_abs"] = out[col] - prev
+        out[f"{col}_yoy_pct"] = out[f"{col}_yoy_abs"] / prev.where(prev != 0) * 100
+    return out
+
+
+def add_sigun_yoy_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    parts = []
+    for _, group in frame.groupby("sigun_name", dropna=False):
+        parts.append(add_yoy_columns(group))
+    return pd.concat(parts, ignore_index=True) if parts else frame.copy()
+
+
+def yoy_bar_line(frame: pd.DataFrame, amount_col: str, pct_col: str, title: str, amount_title: str):
+    base = frame.dropna(subset=[amount_col]).copy()
+    bars = (
+        alt.Chart(base)
+        .mark_bar(opacity=0.75)
+        .encode(
+            x=alt.X("period_date:T", title="기준월"),
+            y=alt.Y(f"{amount_col}:Q", title=amount_title),
+            color=alt.condition(
+                f"datum['{amount_col}'] >= 0",
+                alt.value("#dc2626"),
+                alt.value("#2563eb"),
+            ),
+            tooltip=[
+                alt.Tooltip("period_key:N", title="기준년월"),
+                alt.Tooltip(f"{amount_col}:Q", title=amount_title, format=",.0f"),
+                alt.Tooltip(f"{pct_col}:Q", title="증감률(%)", format=",.1f"),
+            ],
+        )
+    )
+    line = (
+        alt.Chart(base)
+        .mark_line(point=True, color="#111827")
+        .encode(
+            x=alt.X("period_date:T", title="기준월"),
+            y=alt.Y(f"{pct_col}:Q", title="증감률(%)"),
+            tooltip=[
+                alt.Tooltip("period_key:N", title="기준년월"),
+                alt.Tooltip(f"{amount_col}:Q", title=amount_title, format=",.0f"),
+                alt.Tooltip(f"{pct_col}:Q", title="증감률(%)", format=",.1f"),
+            ],
+        )
+    )
+    return alt.layer(bars, line).resolve_scale(y="independent").properties(title=title, height=330)
+
+
+def sigun_amount_trend_chart(frame: pd.DataFrame):
+    amount_long = frame.melt(
+        id_vars=["period_key", "period_date", "sigun_name"],
+        value_vars=["use_amount_million", "charge_amount_million"],
+        var_name="metric",
+        value_name="amount_million",
+    )
+    amount_long["metric_name"] = amount_long["metric"].map(
+        {
+            "use_amount_million": "사용액",
+            "charge_amount_million": "충전액",
+        }
+    )
+    return (
+        alt.Chart(amount_long, title="선택 시군 사용액·충전액 월별 추이")
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("period_date:T", title="기준월"),
+            y=alt.Y("amount_million:Q", title="금액(백만원)"),
+            color=alt.Color("sigun_name:N", title="시군"),
+            strokeDash=alt.StrokeDash("metric_name:N", title="구분"),
+            tooltip=[
+                alt.Tooltip("period_key:N", title="기준년월"),
+                alt.Tooltip("sigun_name:N", title="시군"),
+                alt.Tooltip("metric_name:N", title="구분"),
+                alt.Tooltip("amount_million:Q", title="금액(백만원)", format=",.0f"),
+            ],
+        )
+        .properties(height=380)
+    )
+
+
+def sigun_yoy_rank_chart(frame: pd.DataFrame, limit: int = 15):
+    data = frame.head(limit).copy()
+    return (
+        alt.Chart(data, title=f"시군별 사용액 전년동월대비 증감률 Top {limit}")
+        .mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3)
+        .encode(
+            x=alt.X("use_amount_million_yoy_pct:Q", title="사용액 증감률(%)"),
+            y=alt.Y("sigun_name:N", sort="-x", title=""),
+            color=alt.condition(
+                "datum['use_amount_million_yoy_pct'] >= 0",
+                alt.value("#dc2626"),
+                alt.value("#2563eb"),
+            ),
+            tooltip=[
+                alt.Tooltip("sigun_name:N", title="시군"),
+                alt.Tooltip("use_amount_million:Q", title="월별 사용액(백만원)", format=",.0f"),
+                alt.Tooltip("use_amount_million_yoy_abs:Q", title="사용액 증감액(백만원)", format=",.0f"),
+                alt.Tooltip("use_amount_million_yoy_pct:Q", title="사용액 증감률(%)", format=",.1f"),
+            ],
+        )
+        .properties(height=max(300, min(560, len(data) * 30)))
     )
 
 
@@ -188,7 +316,17 @@ if filtered.empty:
     st.warning("선택한 조건의 데이터가 없습니다.")
     st.stop()
 
+trend = (
+    filtered.groupby(["period_key", "period_date"], as_index=False)[
+        ["new_member_count", "charge_amount_million", "use_amount_million"]
+    ]
+    .sum()
+    .sort_values("period_date")
+)
+trend = add_yoy_columns(trend)
+
 current = filtered[filtered["period_key"] == selected_period].copy()
+selected_trend = trend[trend["period_key"] == selected_period].head(1)
 
 total_new_members = float(current["new_member_count"].sum()) if not current.empty else float("nan")
 total_charge_million = float(current["charge_amount_million"].sum()) if not current.empty else float("nan")
@@ -198,22 +336,46 @@ use_to_charge_rate = (
     if not pd.isna(total_charge_million) and total_charge_million != 0
     else float("nan")
 )
+charge_yoy_abs = (
+    float(selected_trend["charge_amount_million_yoy_abs"].iloc[0]) if not selected_trend.empty else float("nan")
+)
+charge_yoy_pct = (
+    float(selected_trend["charge_amount_million_yoy_pct"].iloc[0]) if not selected_trend.empty else float("nan")
+)
+use_yoy_abs = (
+    float(selected_trend["use_amount_million_yoy_abs"].iloc[0]) if not selected_trend.empty else float("nan")
+)
+use_yoy_pct = (
+    float(selected_trend["use_amount_million_yoy_pct"].iloc[0]) if not selected_trend.empty else float("nan")
+)
+new_member_yoy_abs = (
+    float(selected_trend["new_member_count_yoy_abs"].iloc[0]) if not selected_trend.empty else float("nan")
+)
+new_member_yoy_pct = (
+    float(selected_trend["new_member_count_yoy_pct"].iloc[0]) if not selected_trend.empty else float("nan")
+)
 
 kpi_cols = st.columns(4)
-kpi_cols[0].metric("월별 신규가입자수", "-" if pd.isna(total_new_members) else f"{total_new_members:,.0f}명")
-kpi_cols[1].metric("월별 충전액", fmt_million_money(total_charge_million))
-kpi_cols[2].metric("월별 사용액", fmt_million_money(total_use_million))
+kpi_cols[0].metric(
+    "월별 신규가입자수",
+    "-" if pd.isna(total_new_members) else f"{total_new_members:,.0f}명",
+    delta=None
+    if pd.isna(new_member_yoy_pct)
+    else f"{fmt_delta_count(new_member_yoy_abs)} / {fmt_pct(new_member_yoy_pct)}",
+)
+kpi_cols[1].metric(
+    "월별 충전액",
+    fmt_million_money(total_charge_million),
+    delta=None if pd.isna(charge_yoy_pct) else f"{fmt_delta_million(charge_yoy_abs)} / {fmt_pct(charge_yoy_pct)}",
+)
+kpi_cols[2].metric(
+    "월별 사용액",
+    fmt_million_money(total_use_million),
+    delta=None if pd.isna(use_yoy_pct) else f"{fmt_delta_million(use_yoy_abs)} / {fmt_pct(use_yoy_pct)}",
+)
 kpi_cols[3].metric("사용액/충전액", "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%")
 
 tab_summary, tab_trend, tab_sigun = st.tabs(["요약", "월별 추이", "시군별 현황"])
-
-trend = (
-    filtered.groupby(["period_key", "period_date"], as_index=False)[
-        ["new_member_count", "charge_amount_million", "use_amount_million"]
-    ]
-    .sum()
-    .sort_values("period_date")
-)
 
 with tab_summary:
     amount_long = trend.melt(
@@ -284,6 +446,82 @@ with tab_trend:
         use_container_width=True,
     )
 
+    st.markdown("#### 전년동월대비")
+    first, second, third = st.columns(3)
+    first.altair_chart(
+        yoy_bar_line(
+            trend,
+            "new_member_count_yoy_abs",
+            "new_member_count_yoy_pct",
+            "신규가입자수 전년동월대비",
+            "증감수(명)",
+        ),
+        use_container_width=True,
+    )
+    second.altair_chart(
+        yoy_bar_line(
+            trend,
+            "use_amount_million_yoy_abs",
+            "use_amount_million_yoy_pct",
+            "사용액 전년동월대비",
+            "증감액(백만원)",
+        ),
+        use_container_width=True,
+    )
+    third.altair_chart(
+        yoy_bar_line(
+            trend,
+            "charge_amount_million_yoy_abs",
+            "charge_amount_million_yoy_pct",
+            "충전액 전년동월대비",
+            "증감액(백만원)",
+        ),
+        use_container_width=True,
+    )
+
+    yoy_table = trend[
+        [
+            "period_key",
+            "new_member_count_yoy_abs",
+            "new_member_count_yoy_pct",
+            "use_amount_million_yoy_abs",
+            "use_amount_million_yoy_pct",
+            "charge_amount_million_yoy_abs",
+            "charge_amount_million_yoy_pct",
+        ]
+    ].dropna(
+        subset=["new_member_count_yoy_abs", "use_amount_million_yoy_abs", "charge_amount_million_yoy_abs"],
+        how="all",
+    )
+    if not yoy_table.empty:
+        display_yoy = yoy_table.sort_values("period_key", ascending=False).rename(
+            columns={
+                "period_key": "기준년월",
+                "new_member_count_yoy_abs": "신규가입자수 증감수",
+                "new_member_count_yoy_pct": "신규가입자수 증감률(%)",
+                "use_amount_million_yoy_abs": "사용액 증감액(백만원)",
+                "use_amount_million_yoy_pct": "사용액 증감률(%)",
+                "charge_amount_million_yoy_abs": "충전액 증감액(백만원)",
+                "charge_amount_million_yoy_pct": "충전액 증감률(%)",
+            }
+        )
+        st.dataframe(
+            display_yoy.style.format(
+                {
+                    "신규가입자수 증감수": "{:,.0f}",
+                    "신규가입자수 증감률(%)": "{:+,.1f}",
+                    "사용액 증감액(백만원)": "{:,.0f}",
+                    "사용액 증감률(%)": "{:+,.1f}",
+                    "충전액 증감액(백만원)": "{:,.0f}",
+                    "충전액 증감률(%)": "{:+,.1f}",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("전년동월대비를 계산하려면 최소 13개월 이상의 데이터가 필요합니다.")
+
 with tab_sigun:
     sigun_rank = (
         current.groupby("sigun_name", as_index=False)[
@@ -319,3 +557,52 @@ with tab_sigun:
         }
     )
     st.dataframe(display, use_container_width=True, hide_index=True)
+
+    st.markdown("#### 선택 시군 월별 추이")
+    trend_siguns = selected_siguns or sigun_rank.head(5)["sigun_name"].tolist()
+    sigun_trend = operation[operation["sigun_name"].isin(trend_siguns)].copy()
+    if sigun_trend.empty:
+        st.info("월별 추이를 볼 시군을 선택해 주세요.")
+    else:
+        st.altair_chart(sigun_amount_trend_chart(sigun_trend), use_container_width=True)
+
+    st.markdown("#### 시군별 사용액 전년동월대비 증감률 순위")
+    sigun_yoy = add_sigun_yoy_columns(operation)
+    selected_period_yoy = (
+        sigun_yoy[sigun_yoy["period_key"] == selected_period]
+        .dropna(subset=["use_amount_million_yoy_pct"])
+        .sort_values("use_amount_million_yoy_pct", ascending=False)
+    )
+    if selected_period_yoy.empty:
+        st.info("시군별 전년동월대비 순위를 계산하려면 최소 13개월 이상의 데이터가 필요합니다.")
+    else:
+        st.altair_chart(sigun_yoy_rank_chart(selected_period_yoy), use_container_width=True)
+        display_yoy_rank = selected_period_yoy[
+            [
+                "sigun_name",
+                "use_amount_million",
+                "use_amount_million_yoy_abs",
+                "use_amount_million_yoy_pct",
+                "charge_amount_million",
+            ]
+        ].rename(
+            columns={
+                "sigun_name": "시군명",
+                "use_amount_million": "월별 사용액(백만원)",
+                "use_amount_million_yoy_abs": "사용액 증감액(백만원)",
+                "use_amount_million_yoy_pct": "사용액 증감률(%)",
+                "charge_amount_million": "월별 충전액(백만원)",
+            }
+        )
+        st.dataframe(
+            display_yoy_rank.style.format(
+                {
+                    "월별 사용액(백만원)": "{:,.0f}",
+                    "사용액 증감액(백만원)": "{:,.0f}",
+                    "사용액 증감률(%)": "{:+,.1f}",
+                    "월별 충전액(백만원)": "{:,.0f}",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
