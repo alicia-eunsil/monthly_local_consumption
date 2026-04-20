@@ -153,12 +153,19 @@ def chart_bar(
     )
 
 
-def trend_line(frame: pd.DataFrame, y_col: str, title: str, y_title: str, color: str):
+def trend_x_scale(frame: pd.DataFrame) -> alt.Scale:
+    dates = frame["period_date"].dropna()
+    if dates.empty:
+        return alt.Scale()
+    return alt.Scale(domain=[dates.min(), dates.max()])
+
+
+def trend_line(frame: pd.DataFrame, y_col: str, title: str, y_title: str, color: str, x_scale: alt.Scale):
     return (
         alt.Chart(frame, title=title)
         .mark_line(point=True, color=color)
         .encode(
-            x=alt.X("period_date:T", title="기준월"),
+            x=alt.X("period_date:T", title="기준월", scale=x_scale),
             y=alt.Y(f"{y_col}:Q", title=y_title),
             tooltip=[
                 alt.Tooltip("period_key:N", title="기준년월"),
@@ -185,13 +192,20 @@ def add_sigun_yoy_columns(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True) if parts else frame.copy()
 
 
-def yoy_bar_line(frame: pd.DataFrame, amount_col: str, pct_col: str, title: str, amount_title: str):
+def yoy_bar_line(
+    frame: pd.DataFrame,
+    amount_col: str,
+    pct_col: str,
+    title: str,
+    amount_title: str,
+    x_scale: alt.Scale,
+):
     base = frame.dropna(subset=[amount_col]).copy()
     bars = (
         alt.Chart(base)
         .mark_bar(opacity=0.75)
         .encode(
-            x=alt.X("period_date:T", title="기준월"),
+            x=alt.X("period_date:T", title="기준월", scale=x_scale),
             y=alt.Y(f"{amount_col}:Q", title=amount_title),
             color=alt.condition(
                 f"datum['{amount_col}'] >= 0",
@@ -209,7 +223,7 @@ def yoy_bar_line(frame: pd.DataFrame, amount_col: str, pct_col: str, title: str,
         alt.Chart(base)
         .mark_line(point=True, color="#111827")
         .encode(
-            x=alt.X("period_date:T", title="기준월"),
+            x=alt.X("period_date:T", title="기준월", scale=x_scale),
             y=alt.Y(f"{pct_col}:Q", title="증감률(%)"),
             tooltip=[
                 alt.Tooltip("period_key:N", title="기준년월"),
@@ -219,6 +233,40 @@ def yoy_bar_line(frame: pd.DataFrame, amount_col: str, pct_col: str, title: str,
         )
     )
     return alt.layer(bars, line).resolve_scale(y="independent").properties(title=title, height=330)
+
+
+def metric_trend_table(
+    frame: pd.DataFrame,
+    value_col: str,
+    yoy_abs_col: str,
+    yoy_pct_col: str,
+    value_label: str,
+    yoy_abs_label: str,
+):
+    display = (
+        frame[["period_key", value_col, yoy_abs_col, yoy_pct_col]]
+        .sort_values("period_key", ascending=False)
+        .rename(
+            columns={
+                "period_key": "기준년월",
+                value_col: value_label,
+                yoy_abs_col: yoy_abs_label,
+                yoy_pct_col: "증감률(%)",
+            }
+        )
+    )
+    st.dataframe(
+        display.style.format(
+            {
+                value_label: "{:,.0f}",
+                yoy_abs_label: "{:,.0f}",
+                "증감률(%)": "{:+,.1f}",
+            },
+            na_rep="-",
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def sigun_amount_trend_chart(frame: pd.DataFrame):
@@ -452,94 +500,82 @@ with tab_summary:
     )
 
 with tab_trend:
+    shared_x_scale = trend_x_scale(trend)
+
+    st.markdown("#### 사용액")
     st.altair_chart(
-        trend_line(trend, "use_amount_million", "월별 사용액 추이", "사용액(백만원)", "#0f766e"),
+        trend_line(trend, "use_amount_million", "월별 사용액 추이", "사용액(백만원)", "#0f766e", shared_x_scale),
         use_container_width=True,
     )
     st.altair_chart(
-        trend_line(trend, "charge_amount_million", "월별 충전액 추이", "충전액(백만원)", "#7c3aed"),
+        yoy_bar_line(
+            trend,
+            "use_amount_million_yoy_abs",
+            "use_amount_million_yoy_pct",
+            "전년동월대비 사용액 추이",
+            "증감액(백만원)",
+            shared_x_scale,
+        ),
         use_container_width=True,
     )
-    st.altair_chart(
-        trend_line(trend, "new_member_count", "월별 신규가입자수 추이", "신규가입자수", "#64748b"),
-        use_container_width=True,
+    metric_trend_table(
+        trend,
+        "use_amount_million",
+        "use_amount_million_yoy_abs",
+        "use_amount_million_yoy_pct",
+        "월데이터(백만원)",
+        "전년동월대비 증감(백만원)",
     )
 
-    st.markdown("#### 전년동월대비")
-    first, second, third = st.columns(3)
-    first.altair_chart(
+    st.markdown("#### 충전액")
+    st.altair_chart(
+        trend_line(trend, "charge_amount_million", "월별 충전액 추이", "충전액(백만원)", "#7c3aed", shared_x_scale),
+        use_container_width=True,
+    )
+    st.altair_chart(
+        yoy_bar_line(
+            trend,
+            "charge_amount_million_yoy_abs",
+            "charge_amount_million_yoy_pct",
+            "전년동월대비 충전액 추이",
+            "증감액(백만원)",
+            shared_x_scale,
+        ),
+        use_container_width=True,
+    )
+    metric_trend_table(
+        trend,
+        "charge_amount_million",
+        "charge_amount_million_yoy_abs",
+        "charge_amount_million_yoy_pct",
+        "월데이터(백만원)",
+        "전년동월대비 증감(백만원)",
+    )
+
+    st.markdown("#### 신규가입자수")
+    st.altair_chart(
+        trend_line(trend, "new_member_count", "월별 신규가입자수 추이", "신규가입자수", "#64748b", shared_x_scale),
+        use_container_width=True,
+    )
+    st.altair_chart(
         yoy_bar_line(
             trend,
             "new_member_count_yoy_abs",
             "new_member_count_yoy_pct",
-            "신규가입자수 전년동월대비",
+            "전년동월대비 신규가입자수 추이",
             "증감수(명)",
+            shared_x_scale,
         ),
         use_container_width=True,
     )
-    second.altair_chart(
-        yoy_bar_line(
-            trend,
-            "use_amount_million_yoy_abs",
-            "use_amount_million_yoy_pct",
-            "사용액 전년동월대비",
-            "증감액(백만원)",
-        ),
-        use_container_width=True,
+    metric_trend_table(
+        trend,
+        "new_member_count",
+        "new_member_count_yoy_abs",
+        "new_member_count_yoy_pct",
+        "월데이터(명)",
+        "전년동월대비 증감(명)",
     )
-    third.altair_chart(
-        yoy_bar_line(
-            trend,
-            "charge_amount_million_yoy_abs",
-            "charge_amount_million_yoy_pct",
-            "충전액 전년동월대비",
-            "증감액(백만원)",
-        ),
-        use_container_width=True,
-    )
-
-    yoy_table = trend[
-        [
-            "period_key",
-            "new_member_count_yoy_abs",
-            "new_member_count_yoy_pct",
-            "use_amount_million_yoy_abs",
-            "use_amount_million_yoy_pct",
-            "charge_amount_million_yoy_abs",
-            "charge_amount_million_yoy_pct",
-        ]
-    ].dropna(
-        subset=["new_member_count_yoy_abs", "use_amount_million_yoy_abs", "charge_amount_million_yoy_abs"],
-        how="all",
-    )
-    if not yoy_table.empty:
-        display_yoy = yoy_table.sort_values("period_key", ascending=False).rename(
-            columns={
-                "period_key": "기준년월",
-                "new_member_count_yoy_abs": "신규가입자수 증감수",
-                "new_member_count_yoy_pct": "신규가입자수 증감률(%)",
-                "use_amount_million_yoy_abs": "사용액 증감액(백만원)",
-                "use_amount_million_yoy_pct": "사용액 증감률(%)",
-                "charge_amount_million_yoy_abs": "충전액 증감액(백만원)",
-                "charge_amount_million_yoy_pct": "충전액 증감률(%)",
-            }
-        )
-        st.dataframe(
-            display_yoy.style.format(
-                {
-                    "신규가입자수 증감수": "{:,.0f}",
-                    "신규가입자수 증감률(%)": "{:+,.1f}",
-                    "사용액 증감액(백만원)": "{:,.0f}",
-                    "사용액 증감률(%)": "{:+,.1f}",
-                    "충전액 증감액(백만원)": "{:,.0f}",
-                    "충전액 증감률(%)": "{:+,.1f}",
-                }
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.info("전년동월대비를 계산하려면 최소 13개월 이상의 데이터가 필요합니다.")
 
 with tab_sigun:
     sigun_rank = (
