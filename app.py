@@ -109,6 +109,13 @@ def fmt_pct(value: float) -> str:
     return f"{value:+,.1f}%"
 
 
+def fmt_period_label(value: str) -> str:
+    text = str(value).replace("-", "")
+    if len(text) == 6 and text.isdigit():
+        return f"{text[:4]}년 {text[4:]}월"
+    return str(value)
+
+
 def fmt_delta_count(value: float) -> str:
     if pd.isna(value):
         return "-"
@@ -355,6 +362,7 @@ new_member_yoy_pct = (
     float(selected_trend["new_member_count_yoy_pct"].iloc[0]) if not selected_trend.empty else float("nan")
 )
 
+st.caption(f"상단 지표 기준: {fmt_period_label(selected_period)}")
 kpi_cols = st.columns(4)
 kpi_cols[0].metric(
     "월별 신규가입자수",
@@ -378,6 +386,8 @@ kpi_cols[3].metric("사용액/충전액", "-" if pd.isna(use_to_charge_rate) els
 tab_summary, tab_trend, tab_sigun = st.tabs(["요약", "월별 추이", "시군별 현황"])
 
 with tab_summary:
+    st.caption(f"기준: {fmt_period_label(selected_period)}")
+
     amount_long = trend.melt(
         id_vars=["period_key", "period_date"],
         value_vars=["charge_amount_million", "use_amount_million"],
@@ -559,8 +569,18 @@ with tab_sigun:
     st.dataframe(display, use_container_width=True, hide_index=True)
 
     st.markdown("#### 선택 시군 월별 추이")
-    trend_siguns = selected_siguns or sigun_rank.head(5)["sigun_name"].tolist()
-    sigun_trend = operation[operation["sigun_name"].isin(trend_siguns)].copy()
+    trend_sigun_options = sorted([x for x in operation["sigun_name"].dropna().unique() if x])
+    default_trend_sigun = selected_siguns[0] if selected_siguns else sigun_rank["sigun_name"].iloc[0]
+    default_trend_index = (
+        trend_sigun_options.index(default_trend_sigun) if default_trend_sigun in trend_sigun_options else 0
+    )
+    selected_trend_sigun = st.radio(
+        "시군 선택",
+        trend_sigun_options,
+        index=default_trend_index,
+        horizontal=True,
+    )
+    sigun_trend = operation[operation["sigun_name"] == selected_trend_sigun].copy()
     if sigun_trend.empty:
         st.info("월별 추이를 볼 시군을 선택해 주세요.")
     else:
