@@ -15,10 +15,11 @@ The first version uses the official Gyeonggi Data Dream Open API plus Streamlit 
 
 1. The app calls two official Gyeonggi Data Dream Open APIs with `APP_KEY`.
 2. `src.data` fetches all pages at the API maximum page size of 1,000 rows.
-3. Sales data is normalized into month, region code, industry, and sales amount.
-4. Publication/use data is normalized into month, city, new member count, charge amount, and use amount.
-5. Streamlit `cache_data` keeps normalized frames in memory for 6 hours.
-6. The dashboard aggregates by month, region, industry, and city.
+3. Large paginated APIs are fetched concurrently with per-page retries.
+4. Sales data is normalized into month, region code, industry, and sales amount.
+5. Publication/use data is normalized into month, city, new member count, charge amount, and use amount.
+6. Streamlit `cache_data` keeps normalized frames in memory for 6 hours.
+7. The dashboard aggregates by month, region, industry, and city.
 
 ## Active APIs
 

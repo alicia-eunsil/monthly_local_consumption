@@ -17,7 +17,9 @@ streamlit run app.py
 1차 버전은 DB를 사용하지 않습니다.
 
 - 경기데이터드림 Open API 자동 호출
-- Streamlit `cache_data`로 읽기/정규화 결과를 캐시
+- 페이지당 최대 1,000건씩 병렬 호출
+- 일시적 지연에 대비해 페이지별 재시도
+- Streamlit `cache_data`로 읽기/정규화 결과를 6시간 캐시
 
 사용 API:
 

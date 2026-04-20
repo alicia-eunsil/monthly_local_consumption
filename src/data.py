@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Iterable
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-import json
 
 import numpy as np
 import pandas as pd
@@ -15,6 +16,9 @@ GGDATA_BASE_URL = "https://openapi.gg.go.kr"
 MIDDLE_CATEGORY_SERVICE = "TB25BPTGGCARDCATMSALEM"
 PUBLICATION_USE_SERVICE = "RegionMnyPublctUse"
 MAX_PAGE_SIZE = 1000
+MAX_WORKERS = 8
+REQUEST_TIMEOUT_SECONDS = 120
+REQUEST_RETRIES = 3
 
 
 COLUMN_ALIASES: dict[str, list[str]] = {
@@ -136,10 +140,22 @@ def fetch_ggdata_records(service: str, app_key: str, page_size: int = MAX_PAGE_S
     if total_count <= len(rows):
         return rows
 
-    for page_index in range(2, int(np.ceil(total_count / safe_page_size)) + 1):
-        payload = _fetch_ggdata_page(service, app_key, page_index, safe_page_size)
-        _raise_result_error(payload)
-        rows.extend(_extract_rows(payload, service))
+    total_pages = int(np.ceil(total_count / safe_page_size))
+    page_rows: dict[int, list[dict]] = {1: rows}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(_fetch_ggdata_page, service, app_key, page_index, safe_page_size): page_index
+            for page_index in range(2, total_pages + 1)
+        }
+        for future in as_completed(futures):
+            page_index = futures[future]
+            payload = future.result()
+            _raise_result_error(payload)
+            page_rows[page_index] = _extract_rows(payload, service)
+
+    rows = []
+    for page_index in range(1, total_pages + 1):
+        rows.extend(page_rows.get(page_index, []))
     return rows
 
 
@@ -152,13 +168,21 @@ def _fetch_ggdata_page(service: str, app_key: str, page_index: int, page_size: i
     }
     url = f"{GGDATA_BASE_URL}/{service}?{urlencode(params)}"
     request = Request(url, headers={"User-Agent": "monthly-local-consumption/1.0"})
-    try:
-        with urlopen(request, timeout=60) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except URLError as exc:
-        raise RuntimeError(f"경기데이터드림 Open API 호출에 실패했습니다: {exc}") from exc
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("경기데이터드림 Open API 응답을 JSON으로 해석할 수 없습니다.") from exc
+    last_error: Exception | None = None
+    for attempt in range(1, REQUEST_RETRIES + 1):
+        try:
+            with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (TimeoutError, URLError) as exc:
+            last_error = exc
+            if attempt == REQUEST_RETRIES:
+                break
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("경기데이터드림 Open API 응답을 JSON으로 해석할 수 없습니다.") from exc
+    raise RuntimeError(
+        f"경기데이터드림 Open API 호출에 실패했습니다. "
+        f"service={service}, page={page_index}, size={page_size}, error={last_error}"
+    )
 
 
 def _extract_total_count(payload: dict, service: str) -> int:
