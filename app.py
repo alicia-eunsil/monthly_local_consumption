@@ -138,13 +138,18 @@ def chart_bar(
         .mark_bar(color=color, cornerRadiusTopRight=3, cornerRadiusBottomRight=3)
         .encode(
             x=alt.X(f"{x_col}:Q", title=x_title),
-            y=alt.Y(f"{y_col}:N", sort="-x", title=""),
+            y=alt.Y(
+                f"{y_col}:N",
+                sort="-x",
+                title="",
+                axis=alt.Axis(labelOverlap=False, labelLimit=120),
+            ),
             tooltip=[
                 alt.Tooltip(f"{y_col}:N", title="시군"),
                 alt.Tooltip(f"{x_col}:Q", title=x_title, format=",.0f"),
             ],
         )
-        .properties(height=max(300, min(560, len(data) * 30)))
+        .properties(height=max(340, min(720, len(data) * 38)))
     )
 
 
@@ -255,7 +260,12 @@ def sigun_yoy_rank_chart(frame: pd.DataFrame, limit: int = 15):
         .mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3)
         .encode(
             x=alt.X("use_amount_million_yoy_pct:Q", title="사용액 증감률(%)"),
-            y=alt.Y("sigun_name:N", sort="-x", title=""),
+            y=alt.Y(
+                "sigun_name:N",
+                sort="-x",
+                title="",
+                axis=alt.Axis(labelOverlap=False, labelLimit=120),
+            ),
             color=alt.condition(
                 "datum['use_amount_million_yoy_pct'] >= 0",
                 alt.value("#dc2626"),
@@ -268,7 +278,7 @@ def sigun_yoy_rank_chart(frame: pd.DataFrame, limit: int = 15):
                 alt.Tooltip("use_amount_million_yoy_pct:Q", title="사용액 증감률(%)", format=",.1f"),
             ],
         )
-        .properties(height=max(300, min(560, len(data) * 30)))
+        .properties(height=max(340, min(720, len(data) * 38)))
     )
 
 
@@ -362,7 +372,7 @@ new_member_yoy_pct = (
     float(selected_trend["new_member_count_yoy_pct"].iloc[0]) if not selected_trend.empty else float("nan")
 )
 
-st.caption(f"상단 지표 기준: {fmt_period_label(selected_period)}")
+st.caption(f"기준 년월: {fmt_period_label(selected_period)}")
 kpi_cols = st.columns(4)
 kpi_cols[0].metric(
     "월별 신규가입자수",
@@ -386,8 +396,6 @@ kpi_cols[3].metric("사용액/충전액", "-" if pd.isna(use_to_charge_rate) els
 tab_summary, tab_trend, tab_sigun = st.tabs(["요약", "월별 추이", "시군별 현황"])
 
 with tab_summary:
-    st.caption(f"기준: {fmt_period_label(selected_period)}")
-
     amount_long = trend.melt(
         id_vars=["period_key", "period_date"],
         value_vars=["charge_amount_million", "use_amount_million"],
@@ -417,6 +425,7 @@ with tab_summary:
     )
     st.altair_chart(amount_chart, use_container_width=True)
 
+    st.caption(f"기준: {fmt_period_label(selected_period)}")
     sigun_rank = (
         current.groupby("sigun_name", as_index=False)[
             ["new_member_count", "charge_amount_million", "use_amount_million"]
