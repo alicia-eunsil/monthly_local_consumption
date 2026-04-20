@@ -9,15 +9,21 @@ The first version uses the official Gyeonggi Data Dream Open API plus Streamlit 
 - The source data is monthly public data, not high-frequency transactional data.
 - Analysis is read-heavy and can be recomputed from the official source.
 - A single-user or small-team Streamlit dashboard does not need database operations yet.
-- Keeping one official source path avoids manual upload drift.
+- Keeping two official source paths avoids manual upload drift while keeping the dashboard focused.
 
 ## Current Flow
 
-1. The app calls the official Gyeonggi Data Dream Open API with `APP_KEY`.
+1. The app calls two official Gyeonggi Data Dream Open APIs with `APP_KEY`.
 2. `src.data` fetches all pages at the API maximum page size of 1,000 rows.
-3. Columns are normalized into a standard schema.
-4. Streamlit `cache_data` keeps the normalized frame in memory for 6 hours.
-5. The dashboard aggregates by month, region, and industry.
+3. Sales data is normalized into month, region code, industry, and sales amount.
+4. Publication/use data is normalized into month, city, new member count, charge amount, and use amount.
+5. Streamlit `cache_data` keeps normalized frames in memory for 6 hours.
+6. The dashboard aggregates by month, region, industry, and city.
+
+## Active APIs
+
+- `TB25BPTGGCARDCATMSALEM`: card industry middle-category local currency sales
+- `RegionMnyPublctUse`: local currency publication and use status
 
 ## When To Add A Database
 

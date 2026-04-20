@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from io import BytesIO
 from typing import Iterable
-from urllib.parse import urlencode
 from urllib.error import URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+import json
 
 import numpy as np
 import pandas as pd
@@ -14,6 +13,7 @@ import pandas as pd
 
 GGDATA_BASE_URL = "https://openapi.gg.go.kr"
 MIDDLE_CATEGORY_SERVICE = "TB25BPTGGCARDCATMSALEM"
+PUBLICATION_USE_SERVICE = "RegionMnyPublctUse"
 MAX_PAGE_SIZE = 1000
 
 
@@ -117,34 +117,29 @@ class LoadResult:
     original_columns: list[str]
 
 
-def read_csv_bytes(content: bytes, source_name: str) -> pd.DataFrame:
-    encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
-    last_error: Exception | None = None
-    for encoding in encodings:
-        try:
-            return pd.read_csv(BytesIO(content), encoding=encoding)
-        except UnicodeDecodeError as exc:
-            last_error = exc
-    if last_error:
-        raise last_error
-    raise ValueError(f"CSV 파일을 읽을 수 없습니다: {source_name}")
-
-
 def fetch_ggdata_middle_category_records(app_key: str, page_size: int = MAX_PAGE_SIZE) -> list[dict]:
+    return fetch_ggdata_records(MIDDLE_CATEGORY_SERVICE, app_key, page_size=page_size)
+
+
+def fetch_ggdata_publication_use_records(app_key: str, page_size: int = MAX_PAGE_SIZE) -> list[dict]:
+    return fetch_ggdata_records(PUBLICATION_USE_SERVICE, app_key, page_size=page_size)
+
+
+def fetch_ggdata_records(service: str, app_key: str, page_size: int = MAX_PAGE_SIZE) -> list[dict]:
     if not app_key:
         raise RuntimeError("APP_KEY가 설정되어 있지 않습니다.")
     safe_page_size = min(max(int(page_size), 1), MAX_PAGE_SIZE)
-    first_payload = _fetch_ggdata_page(MIDDLE_CATEGORY_SERVICE, app_key, 1, safe_page_size)
+    first_payload = _fetch_ggdata_page(service, app_key, 1, safe_page_size)
     _raise_result_error(first_payload)
-    total_count = _extract_total_count(first_payload, MIDDLE_CATEGORY_SERVICE)
-    rows = _extract_rows(first_payload, MIDDLE_CATEGORY_SERVICE)
+    total_count = _extract_total_count(first_payload, service)
+    rows = _extract_rows(first_payload, service)
     if total_count <= len(rows):
         return rows
 
     for page_index in range(2, int(np.ceil(total_count / safe_page_size)) + 1):
-        payload = _fetch_ggdata_page(MIDDLE_CATEGORY_SERVICE, app_key, page_index, safe_page_size)
+        payload = _fetch_ggdata_page(service, app_key, page_index, safe_page_size)
         _raise_result_error(payload)
-        rows.extend(_extract_rows(payload, MIDDLE_CATEGORY_SERVICE))
+        rows.extend(_extract_rows(payload, service))
     return rows
 
 
@@ -255,6 +250,29 @@ def build_load_result(df: pd.DataFrame, source_name: str) -> LoadResult:
         missing_required=missing,
         original_columns=[str(col) for col in df.columns],
     )
+
+
+def normalize_publication_use_frame(df: pd.DataFrame) -> pd.DataFrame:
+    source = df.copy()
+    source.columns = [str(col).strip() for col in source.columns]
+    required = ["STD_YM", "SIGUN_NM", "CARD_PUBLCT_CNT", "CARD_CHRGNG_AMT", "CARD_USE_AMT"]
+    missing = [col for col in required if col not in source.columns]
+    if missing:
+        raise RuntimeError("발행 및 이용 현황 필수 컬럼을 찾지 못했습니다: " + ", ".join(missing))
+
+    out = pd.DataFrame(
+        {
+            "period_key": source["STD_YM"].map(_period_key),
+            "sigun_name": source["SIGUN_NM"].fillna("").astype(str).str.strip(),
+            "new_member_count": source["CARD_PUBLCT_CNT"].map(_to_float),
+            "charge_amount_million": source["CARD_CHRGNG_AMT"].map(_to_float),
+            "use_amount_million": source["CARD_USE_AMT"].map(_to_float),
+            "sigun_code": source["SIGUN_CD"].fillna("").astype(str).str.strip() if "SIGUN_CD" in source.columns else "",
+        }
+    )
+    out["period_date"] = pd.to_datetime(out["period_key"] + "01", format="%Y%m%d", errors="coerce")
+    out = out.dropna(subset=["period_date"])
+    return out
 
 
 def aggregate_by(
