@@ -525,75 +525,84 @@ with tab_trend:
         trend_line(trend, "use_amount_million", "월별 사용액 추이", "사용액(백만원)", "#0f766e", shared_x_scale),
         use_container_width=True,
     )
-    st.altair_chart(
-        yoy_bar_line(
+    left, right = st.columns([3, 2])
+    with left:
+        st.altair_chart(
+            yoy_bar_line(
+                trend,
+                "use_amount_million_yoy_abs",
+                "use_amount_million_yoy_pct",
+                "전년동월대비 사용액 추이",
+                "증감액(백만원)",
+                shared_x_scale,
+            ),
+            use_container_width=True,
+        )
+    with right:
+        metric_trend_table(
             trend,
+            "use_amount_million",
             "use_amount_million_yoy_abs",
             "use_amount_million_yoy_pct",
-            "전년동월대비 사용액 추이",
-            "증감액(백만원)",
-            shared_x_scale,
-        ),
-        use_container_width=True,
-    )
-    metric_trend_table(
-        trend,
-        "use_amount_million",
-        "use_amount_million_yoy_abs",
-        "use_amount_million_yoy_pct",
-        "월데이터(백만원)",
-        "전년동월대비 증감(백만원)",
-    )
+            "월데이터(백만원)",
+            "전년동월대비 증감(백만원)",
+        )
 
     st.markdown("#### 충전액")
     st.altair_chart(
         trend_line(trend, "charge_amount_million", "월별 충전액 추이", "충전액(백만원)", "#7c3aed", shared_x_scale),
         use_container_width=True,
     )
-    st.altair_chart(
-        yoy_bar_line(
+    left, right = st.columns([3, 2])
+    with left:
+        st.altair_chart(
+            yoy_bar_line(
+                trend,
+                "charge_amount_million_yoy_abs",
+                "charge_amount_million_yoy_pct",
+                "전년동월대비 충전액 추이",
+                "증감액(백만원)",
+                shared_x_scale,
+            ),
+            use_container_width=True,
+        )
+    with right:
+        metric_trend_table(
             trend,
+            "charge_amount_million",
             "charge_amount_million_yoy_abs",
             "charge_amount_million_yoy_pct",
-            "전년동월대비 충전액 추이",
-            "증감액(백만원)",
-            shared_x_scale,
-        ),
-        use_container_width=True,
-    )
-    metric_trend_table(
-        trend,
-        "charge_amount_million",
-        "charge_amount_million_yoy_abs",
-        "charge_amount_million_yoy_pct",
-        "월데이터(백만원)",
-        "전년동월대비 증감(백만원)",
-    )
+            "월데이터(백만원)",
+            "전년동월대비 증감(백만원)",
+        )
 
     st.markdown("#### 신규가입자수")
     st.altair_chart(
         trend_line(trend, "new_member_count", "월별 신규가입자수 추이", "신규가입자수", "#64748b", shared_x_scale),
         use_container_width=True,
     )
-    st.altair_chart(
-        yoy_bar_line(
+    left, right = st.columns([3, 2])
+    with left:
+        st.altair_chart(
+            yoy_bar_line(
+                trend,
+                "new_member_count_yoy_abs",
+                "new_member_count_yoy_pct",
+                "전년동월대비 신규가입자수 추이",
+                "증감수(명)",
+                shared_x_scale,
+            ),
+            use_container_width=True,
+        )
+    with right:
+        metric_trend_table(
             trend,
+            "new_member_count",
             "new_member_count_yoy_abs",
             "new_member_count_yoy_pct",
-            "전년동월대비 신규가입자수 추이",
-            "증감수(명)",
-            shared_x_scale,
-        ),
-        use_container_width=True,
-    )
-    metric_trend_table(
-        trend,
-        "new_member_count",
-        "new_member_count_yoy_abs",
-        "new_member_count_yoy_pct",
-        "월데이터(명)",
-        "전년동월대비 증감(명)",
-    )
+            "월데이터(명)",
+            "전년동월대비 증감(명)",
+        )
 
 with tab_sigun:
     st.caption(f"기준년월: {fmt_period_label(selected_period)}")
