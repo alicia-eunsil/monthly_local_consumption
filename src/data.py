@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Callable, Iterable
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -121,15 +121,41 @@ class LoadResult:
     original_columns: list[str]
 
 
-def fetch_ggdata_middle_category_records(app_key: str, page_size: int = MAX_PAGE_SIZE) -> list[dict]:
-    return fetch_ggdata_records(MIDDLE_CATEGORY_SERVICE, app_key, page_size=page_size)
+ProgressCallback = Callable[[str, int, int], None]
 
 
-def fetch_ggdata_publication_use_records(app_key: str, page_size: int = MAX_PAGE_SIZE) -> list[dict]:
-    return fetch_ggdata_records(PUBLICATION_USE_SERVICE, app_key, page_size=page_size)
+def fetch_ggdata_middle_category_records(
+    app_key: str,
+    page_size: int = MAX_PAGE_SIZE,
+    progress_callback: ProgressCallback | None = None,
+) -> list[dict]:
+    return fetch_ggdata_records(
+        MIDDLE_CATEGORY_SERVICE,
+        app_key,
+        page_size=page_size,
+        progress_callback=progress_callback,
+    )
 
 
-def fetch_ggdata_records(service: str, app_key: str, page_size: int = MAX_PAGE_SIZE) -> list[dict]:
+def fetch_ggdata_publication_use_records(
+    app_key: str,
+    page_size: int = MAX_PAGE_SIZE,
+    progress_callback: ProgressCallback | None = None,
+) -> list[dict]:
+    return fetch_ggdata_records(
+        PUBLICATION_USE_SERVICE,
+        app_key,
+        page_size=page_size,
+        progress_callback=progress_callback,
+    )
+
+
+def fetch_ggdata_records(
+    service: str,
+    app_key: str,
+    page_size: int = MAX_PAGE_SIZE,
+    progress_callback: ProgressCallback | None = None,
+) -> list[dict]:
     if not app_key:
         raise RuntimeError("APP_KEY가 설정되어 있지 않습니다.")
     safe_page_size = min(max(int(page_size), 1), MAX_PAGE_SIZE)
@@ -138,9 +164,13 @@ def fetch_ggdata_records(service: str, app_key: str, page_size: int = MAX_PAGE_S
     total_count = _extract_total_count(first_payload, service)
     rows = _extract_rows(first_payload, service)
     if total_count <= len(rows):
+        if progress_callback:
+            progress_callback(service, 1, 1)
         return rows
 
     total_pages = int(np.ceil(total_count / safe_page_size))
+    if progress_callback:
+        progress_callback(service, 1, total_pages)
     page_rows: dict[int, list[dict]] = {1: rows}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
@@ -152,6 +182,8 @@ def fetch_ggdata_records(service: str, app_key: str, page_size: int = MAX_PAGE_S
             payload = future.result()
             _raise_result_error(payload)
             page_rows[page_index] = _extract_rows(payload, service)
+            if progress_callback:
+                progress_callback(service, len(page_rows), total_pages)
 
     rows = []
     for page_index in range(1, total_pages + 1):

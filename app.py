@@ -63,17 +63,43 @@ def require_access_code() -> None:
     st.stop()
 
 
-@st.cache_data(show_spinner=False, ttl=60 * 60 * 6)
-def _load_data_cached(app_key: str):
-    sales_records = fetch_ggdata_middle_category_records(app_key)
-    sales = build_load_result(
-        pd.DataFrame(sales_records),
-        "경기데이터드림 Open API 카드업종중분류 매출",
-    )
+def _load_data_with_progress(app_key: str):
+    status = st.empty()
+    progress = st.progress(0)
+    stage_weights = {
+        "sales": (0, 85),
+        "operation": (85, 15),
+    }
 
-    operation_records = fetch_ggdata_publication_use_records(app_key)
-    operation = normalize_publication_use_frame(pd.DataFrame(operation_records))
-    return sales, operation
+    def update(stage: str, service: str, done: int, total: int) -> None:
+        start, weight = stage_weights[stage]
+        safe_total = max(total, 1)
+        percent = min(99, start + int(weight * done / safe_total))
+        label = "매출 데이터" if stage == "sales" else "운영 현황"
+        status.info(f"{label} 불러오는 중... ({done:,}/{safe_total:,} 페이지)")
+        progress.progress(percent)
+
+    try:
+        sales_records = fetch_ggdata_middle_category_records(
+            app_key,
+            progress_callback=lambda service, done, total: update("sales", service, done, total),
+        )
+        sales = build_load_result(
+            pd.DataFrame(sales_records),
+            "경기데이터드림 Open API 카드업종중분류 매출",
+        )
+
+        operation_records = fetch_ggdata_publication_use_records(
+            app_key,
+            progress_callback=lambda service, done, total: update("operation", service, done, total),
+        )
+        operation = normalize_publication_use_frame(pd.DataFrame(operation_records))
+        progress.progress(100)
+        status.success("데이터 로딩 완료")
+        return sales, operation
+    finally:
+        progress.empty()
+        status.empty()
 
 
 def fmt_money(value: float) -> str:
@@ -144,15 +170,30 @@ with st.sidebar:
     app_key = get_app_key()
     if app_key:
         st.success("APP_KEY 설정됨")
+        if st.button("데이터 새로고침"):
+            st.session_state.pop("_loaded_app_key", None)
+            st.session_state.pop("_loaded_sales_result", None)
+            st.session_state.pop("_loaded_operation", None)
+            st.rerun()
     else:
         st.error("APP_KEY가 필요합니다.")
 
 if not app_key:
     st.stop()
 
-with st.spinner("경기데이터드림 Open API 데이터를 불러오는 중입니다."):
+if (
+    st.session_state.get("_loaded_app_key") == app_key
+    and "_loaded_sales_result" in st.session_state
+    and "_loaded_operation" in st.session_state
+):
+    sales_result = st.session_state["_loaded_sales_result"]
+    operation = st.session_state["_loaded_operation"]
+else:
     try:
-        sales_result, operation = _load_data_cached(app_key)
+        sales_result, operation = _load_data_with_progress(app_key)
+        st.session_state["_loaded_app_key"] = app_key
+        st.session_state["_loaded_sales_result"] = sales_result
+        st.session_state["_loaded_operation"] = operation
     except Exception as exc:  # noqa: BLE001
         st.error(str(exc))
         st.stop()
