@@ -2,7 +2,7 @@
 
 ## Decision
 
-The first version uses the official Gyeonggi Data Dream CSV download plus Streamlit cache, not a database.
+The first version uses the official Gyeonggi Data Dream Open API plus Streamlit cache, not a database.
 
 ## Why
 
@@ -13,8 +13,8 @@ The first version uses the official Gyeonggi Data Dream CSV download plus Stream
 
 ## Current Flow
 
-1. The app downloads the official Gyeonggi Data Dream Sheet CSV.
-2. `src.data` reads the file with Korean encoding fallbacks.
+1. The app calls the official Gyeonggi Data Dream Open API with `APP_KEY`.
+2. `src.data` fetches all pages at the API maximum page size of 1,000 rows.
 3. Columns are normalized into a standard schema.
 4. Streamlit `cache_data` keeps the normalized frame in memory for 6 hours.
 5. The dashboard aggregates by month, region, and industry.
@@ -31,11 +31,11 @@ Add SQLite, DuckDB, or Postgres if one of these becomes true:
 
 ## Likely Next Step
 
-If official CSV loading becomes slow, add a Parquet cache before adding a database.
+If API loading becomes slow, add a Parquet cache before adding a database.
 
 Recommended order:
 
-1. Official CSV + Streamlit cache
-2. Official CSV + Parquet cache
+1. Open API + Streamlit cache
+2. Open API + Parquet cache
 3. DuckDB over Parquet
 4. Postgres only if multi-user persistence is needed

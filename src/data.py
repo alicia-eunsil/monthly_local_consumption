@@ -1,24 +1,20 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Iterable
+from urllib.parse import urlencode
 from urllib.error import URLError
-from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
-from http.cookiejar import CookieJar
+from urllib.request import Request, urlopen
 
 import numpy as np
 import pandas as pd
 
 
-GGDATA_MIDDLE_CATEGORY_CSV_URL = (
-    "https://data.gg.go.kr/portal/data/sheet/downloadSheetData.do"
-    "?downloadType=C&infId=21P6SA4OOH5AW25V3QRP38272636&infSeq=1"
-)
-GGDATA_MIDDLE_CATEGORY_PAGE_URL = (
-    "https://data.gg.go.kr/portal/data/service/selectServicePage.do"
-    "?infId=21P6SA4OOH5AW25V3QRP38272636&infSeq=1"
-)
+GGDATA_BASE_URL = "https://openapi.gg.go.kr"
+MIDDLE_CATEGORY_SERVICE = "TB25BPTGGCARDCATMSALEM"
+MAX_PAGE_SIZE = 1000
 
 
 COLUMN_ALIASES: dict[str, list[str]] = {
@@ -33,6 +29,7 @@ COLUMN_ALIASES: dict[str, list[str]] = {
     "emd_code": [
         "읍면동코드",
         "행정동코드",
+        "ADMDONG_CD",
         "EMD_CD",
         "ADMI_CD",
         "emd_code",
@@ -50,6 +47,7 @@ COLUMN_ALIASES: dict[str, list[str]] = {
         "중분류업종코드",
         "업종중분류코드",
         "업종코드",
+        "MDCLASS_INDUTYPE_CD",
         "INDUTYPE_MLSFC_CODE",
         "industry_code",
     ],
@@ -57,6 +55,7 @@ COLUMN_ALIASES: dict[str, list[str]] = {
         "중분류업종명",
         "업종중분류명",
         "업종명",
+        "MDCLASS_INDUTYPE_NM",
         "INDUTYPE_MLSFC_NM",
         "industry_name",
     ],
@@ -64,6 +63,7 @@ COLUMN_ALIASES: dict[str, list[str]] = {
         "매출금액",
         "매출액",
         "지역화폐매출금액",
+        "SALES_AMT",
         "SALE_AMT",
         "sales_amount",
     ],
@@ -130,31 +130,71 @@ def read_csv_bytes(content: bytes, source_name: str) -> pd.DataFrame:
     raise ValueError(f"CSV 파일을 읽을 수 없습니다: {source_name}")
 
 
-def download_ggdata_middle_category_csv() -> bytes:
-    headers = {
-        "User-Agent": "Mozilla/5.0 monthly-local-consumption/1.0",
-        "Accept": "text/csv,application/octet-stream,*/*",
-        "Referer": GGDATA_MIDDLE_CATEGORY_PAGE_URL,
+def fetch_ggdata_middle_category_records(app_key: str, page_size: int = MAX_PAGE_SIZE) -> list[dict]:
+    if not app_key:
+        raise RuntimeError("APP_KEY가 설정되어 있지 않습니다.")
+    safe_page_size = min(max(int(page_size), 1), MAX_PAGE_SIZE)
+    first_payload = _fetch_ggdata_page(MIDDLE_CATEGORY_SERVICE, app_key, 1, safe_page_size)
+    _raise_result_error(first_payload)
+    total_count = _extract_total_count(first_payload, MIDDLE_CATEGORY_SERVICE)
+    rows = _extract_rows(first_payload, MIDDLE_CATEGORY_SERVICE)
+    if total_count <= len(rows):
+        return rows
+
+    for page_index in range(2, int(np.ceil(total_count / safe_page_size)) + 1):
+        payload = _fetch_ggdata_page(MIDDLE_CATEGORY_SERVICE, app_key, page_index, safe_page_size)
+        _raise_result_error(payload)
+        rows.extend(_extract_rows(payload, MIDDLE_CATEGORY_SERVICE))
+    return rows
+
+
+def _fetch_ggdata_page(service: str, app_key: str, page_index: int, page_size: int) -> dict:
+    params = {
+        "Key": app_key,
+        "Type": "json",
+        "pIndex": page_index,
+        "pSize": page_size,
     }
-    cookie_jar = CookieJar()
-    opener = build_opener(HTTPCookieProcessor(cookie_jar))
-    page_request = Request(GGDATA_MIDDLE_CATEGORY_PAGE_URL, headers=headers)
-    request = Request(
-        GGDATA_MIDDLE_CATEGORY_CSV_URL,
-        headers=headers,
-    )
+    url = f"{GGDATA_BASE_URL}/{service}?{urlencode(params)}"
+    request = Request(url, headers={"User-Agent": "monthly-local-consumption/1.0"})
     try:
-        opener.open(page_request, timeout=30).read()
-        with opener.open(request, timeout=60) as response:
-            content = response.read()
+        with urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode("utf-8"))
     except URLError as exc:
-        raise RuntimeError(f"경기데이터드림 CSV 다운로드에 실패했습니다: {exc}") from exc
-    if _looks_like_block_page(content):
-        raise RuntimeError(
-            "경기데이터드림이 서버 측 자동 다운로드를 차단했습니다. "
-            "Open API 요청주소가 공개되지 않은 데이터셋이라 현재 자동 수집을 진행할 수 없습니다."
-        )
-    return content
+        raise RuntimeError(f"경기데이터드림 Open API 호출에 실패했습니다: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("경기데이터드림 Open API 응답을 JSON으로 해석할 수 없습니다.") from exc
+
+
+def _extract_total_count(payload: dict, service: str) -> int:
+    sections = payload.get(service, [])
+    for section in sections:
+        head = section.get("head") if isinstance(section, dict) else None
+        if not head:
+            continue
+        for item in head:
+            if "list_total_count" in item:
+                return int(item.get("list_total_count") or 0)
+            result = item.get("RESULT")
+            if result and result.get("CODE") not in {"INFO-000", "INFO-200"}:
+                raise RuntimeError(result.get("MESSAGE", "Open API 오류가 발생했습니다."))
+    return 0
+
+
+def _raise_result_error(payload: dict) -> None:
+    top_result = payload.get("RESULT")
+    if isinstance(top_result, dict):
+        code = str(top_result.get("CODE", ""))
+        if code and code not in {"INFO-000", "INFO-200"}:
+            raise RuntimeError(top_result.get("MESSAGE", "Open API 오류가 발생했습니다."))
+
+
+def _extract_rows(payload: dict, service: str) -> list[dict]:
+    sections = payload.get(service, [])
+    for section in sections:
+        if isinstance(section, dict) and "row" in section:
+            return list(section.get("row") or [])
+    return []
 
 
 def normalize_consumption_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
@@ -286,8 +326,3 @@ def _to_float(value: object) -> float:
         return float(text)
     except ValueError:
         return np.nan
-
-
-def _looks_like_block_page(content: bytes) -> bool:
-    head = content[:500].lower()
-    return b"<script" in head or b"<html" in head or "정상적인 접근이 아닙니다".encode("utf-8") in content[:1000]

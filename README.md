@@ -16,12 +16,12 @@ streamlit run app.py
 
 1차 버전은 DB를 사용하지 않습니다.
 
-- 경기데이터드림 CSV 자동 다운로드
+- 경기데이터드림 Open API 자동 호출
 - Streamlit `cache_data`로 읽기/정규화 결과를 캐시
 
 ## APP_KEY 설정
 
-현재 앱은 경기데이터드림 Sheet CSV 다운로드를 데이터 소스로 사용합니다. 이 데이터셋의 Open API 명세에는 요청주소가 표시되지 않아, `APP_KEY`는 설정 확인과 향후 Open API 전환용으로 보관합니다.
+현재 앱은 경기데이터드림 Open API를 데이터 소스로 사용합니다. `APP_KEY`는 필수입니다.
 
 Streamlit Cloud에서는 App settings > Secrets 또는 Environment variables에 다음 값을 설정하세요.
 
