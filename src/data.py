@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
+from urllib.error import URLError
+from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
+from http.cookiejar import CookieJar
 
 import numpy as np
 import pandas as pd
@@ -11,6 +14,14 @@ import pandas as pd
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
+GGDATA_MIDDLE_CATEGORY_CSV_URL = (
+    "https://data.gg.go.kr/portal/data/sheet/downloadSheetData.do"
+    "?downloadType=C&infId=21P6SA4OOH5AW25V3QRP38272636&infSeq=1"
+)
+GGDATA_MIDDLE_CATEGORY_PAGE_URL = (
+    "https://data.gg.go.kr/portal/data/service/selectServicePage.do"
+    "?infId=21P6SA4OOH5AW25V3QRP38272636&infSeq=1"
+)
 
 
 COLUMN_ALIASES: dict[str, list[str]] = {
@@ -129,6 +140,33 @@ def read_csv_bytes(content: bytes, source_name: str) -> pd.DataFrame:
 
 def read_csv_path(path: Path) -> pd.DataFrame:
     return read_csv_bytes(path.read_bytes(), path.name)
+
+
+def download_ggdata_middle_category_csv() -> bytes:
+    headers = {
+        "User-Agent": "Mozilla/5.0 monthly-local-consumption/1.0",
+        "Accept": "text/csv,application/octet-stream,*/*",
+        "Referer": GGDATA_MIDDLE_CATEGORY_PAGE_URL,
+    }
+    cookie_jar = CookieJar()
+    opener = build_opener(HTTPCookieProcessor(cookie_jar))
+    page_request = Request(GGDATA_MIDDLE_CATEGORY_PAGE_URL, headers=headers)
+    request = Request(
+        GGDATA_MIDDLE_CATEGORY_CSV_URL,
+        headers=headers,
+    )
+    try:
+        opener.open(page_request, timeout=30).read()
+        with opener.open(request, timeout=60) as response:
+            content = response.read()
+    except URLError as exc:
+        raise RuntimeError(f"경기데이터드림 CSV 다운로드에 실패했습니다: {exc}") from exc
+    if _looks_like_block_page(content):
+        raise RuntimeError(
+            "경기데이터드림이 서버 측 자동 다운로드를 차단했습니다. "
+            "Open API 요청주소가 공개되지 않은 데이터셋이라 현재는 CSV 업로드 방식을 사용해야 합니다."
+        )
+    return content
 
 
 def normalize_consumption_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
@@ -303,3 +341,8 @@ def _to_float(value: object) -> float:
         return float(text)
     except ValueError:
         return np.nan
+
+
+def _looks_like_block_page(content: bytes) -> bool:
+    head = content[:500].lower()
+    return b"<script" in head or b"<html" in head or "정상적인 접근이 아닙니다".encode("utf-8") in content[:1000]

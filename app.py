@@ -12,6 +12,7 @@ from src.data import (
     period_change,
     read_csv_bytes,
     read_csv_path,
+    download_ggdata_middle_category_csv,
     sample_data,
 )
 from src.settings import get_access_code, get_app_key
@@ -83,6 +84,13 @@ def _load_upload_cached(content: bytes, source_name: str):
 @st.cache_data(show_spinner=False)
 def _load_sample_cached():
     return build_load_result(sample_data(), "샘플 데이터")
+
+
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 6)
+def _load_ggdata_csv_cached():
+    content = download_ggdata_middle_category_csv()
+    raw = read_csv_bytes(content, "경기데이터드림 카드업종중분류 CSV")
+    return build_load_result(raw, "경기데이터드림 카드업종중분류 CSV")
 
 
 def fmt_money(value: float) -> str:
@@ -182,17 +190,27 @@ with st.sidebar:
         source_type = "업로드 CSV"
     elif csv_files:
         source_type = "data 폴더 CSV"
+    elif app_key:
+        source_type = "경기데이터드림 CSV"
     else:
-        source_type = "샘플 데이터"
+        source_type = "경기데이터드림 CSV"
 
     source_type = st.radio(
         "데이터 소스",
-        ["업로드 CSV", "data 폴더 CSV", "샘플 데이터"],
-        index=["업로드 CSV", "data 폴더 CSV", "샘플 데이터"].index(source_type),
+        ["경기데이터드림 CSV", "업로드 CSV", "data 폴더 CSV", "샘플 데이터"],
+        index=["경기데이터드림 CSV", "업로드 CSV", "data 폴더 CSV", "샘플 데이터"].index(source_type),
     )
 
     load_result = None
-    if source_type == "업로드 CSV":
+    if source_type == "경기데이터드림 CSV":
+        with st.spinner("경기데이터드림 CSV를 불러오는 중입니다."):
+            try:
+                load_result = _load_ggdata_csv_cached()
+            except Exception as exc:  # noqa: BLE001
+                st.error(str(exc))
+                st.info("포털 다운로드가 막히면 CSV 업로드 또는 data 폴더 CSV 방식을 사용하세요.")
+                st.stop()
+    elif source_type == "업로드 CSV":
         if uploaded is None:
             st.info("CSV 파일을 업로드하세요.")
             st.stop()
