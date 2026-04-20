@@ -133,7 +133,7 @@ def chart_bar(
     color: str = "#2563eb",
 ):
     data = frame.head(limit).copy()
-    return (
+    bars = (
         alt.Chart(data, title=title)
         .mark_bar(color=color, cornerRadiusTopRight=3, cornerRadiusBottomRight=3)
         .encode(
@@ -149,8 +149,17 @@ def chart_bar(
                 alt.Tooltip(f"{x_col}:Q", title=x_title, format=",.0f"),
             ],
         )
-        .properties(height=max(340, min(720, len(data) * 38)))
     )
+    labels = (
+        alt.Chart(data)
+        .mark_text(align="left", baseline="middle", dx=4, color="#111827")
+        .encode(
+            x=alt.X(f"{x_col}:Q"),
+            y=alt.Y(f"{y_col}:N", sort="-x"),
+            text=alt.Text(f"{x_col}:Q", format=",.0f"),
+        )
+    )
+    return alt.layer(bars, labels).properties(height=max(340, min(720, len(data) * 38)))
 
 
 def trend_x_scale(frame: pd.DataFrame) -> alt.Scale:
@@ -303,7 +312,7 @@ def sigun_amount_trend_chart(frame: pd.DataFrame):
 
 def sigun_yoy_rank_chart(frame: pd.DataFrame, limit: int = 15):
     data = frame.head(limit).copy()
-    return (
+    bars = (
         alt.Chart(data, title=f"시군별 사용액 전년동월대비 증감률 Top {limit}")
         .mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3)
         .encode(
@@ -326,8 +335,17 @@ def sigun_yoy_rank_chart(frame: pd.DataFrame, limit: int = 15):
                 alt.Tooltip("use_amount_million_yoy_pct:Q", title="사용액 증감률(%)", format=",.1f"),
             ],
         )
-        .properties(height=max(340, min(720, len(data) * 38)))
     )
+    labels = (
+        alt.Chart(data)
+        .mark_text(align="left", baseline="middle", dx=4, color="#111827")
+        .encode(
+            x=alt.X("use_amount_million_yoy_pct:Q"),
+            y=alt.Y("sigun_name:N", sort="-x"),
+            text=alt.Text("use_amount_million_yoy_pct:Q", format="+,.1f"),
+        )
+    )
+    return alt.layer(bars, labels).properties(height=max(340, min(720, len(data) * 38)))
 
 
 require_access_code()
@@ -578,6 +596,8 @@ with tab_trend:
     )
 
 with tab_sigun:
+    st.caption(f"기준년월: {fmt_period_label(selected_period)}")
+
     sigun_rank = (
         current.groupby("sigun_name", as_index=False)[
             ["new_member_count", "charge_amount_million", "use_amount_million"]
