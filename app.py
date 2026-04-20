@@ -207,14 +207,15 @@ def yoy_bar_line(
     pct_col: str,
     title: str,
     amount_title: str,
-    x_scale: alt.Scale,
+    x_scale: alt.Scale | None = None,
 ):
     base = frame.dropna(subset=[amount_col]).copy()
+    x_encoding = alt.X("period_date:T", title="기준월") if x_scale is None else alt.X("period_date:T", title="기준월", scale=x_scale)
     bars = (
         alt.Chart(base)
         .mark_bar(opacity=0.75)
         .encode(
-            x=alt.X("period_date:T", title="기준월", scale=x_scale),
+            x=x_encoding,
             y=alt.Y(f"{amount_col}:Q", title=amount_title),
             color=alt.condition(
                 f"datum['{amount_col}'] >= 0",
@@ -232,7 +233,7 @@ def yoy_bar_line(
         alt.Chart(base)
         .mark_line(point=True, color="#111827")
         .encode(
-            x=alt.X("period_date:T", title="기준월", scale=x_scale),
+            x=x_encoding,
             y=alt.Y(f"{pct_col}:Q", title="증감률(%)"),
             tooltip=[
                 alt.Tooltip("period_key:N", title="기준년월"),
@@ -534,7 +535,7 @@ with tab_trend:
                 "use_amount_million_yoy_pct",
                 "전년동월대비 사용액 추이",
                 "증감액(백만원)",
-                shared_x_scale,
+                None,
             ),
             use_container_width=True,
         )
@@ -562,7 +563,7 @@ with tab_trend:
                 "charge_amount_million_yoy_pct",
                 "전년동월대비 충전액 추이",
                 "증감액(백만원)",
-                shared_x_scale,
+                None,
             ),
             use_container_width=True,
         )
@@ -590,7 +591,7 @@ with tab_trend:
                 "new_member_count_yoy_pct",
                 "전년동월대비 신규가입자수 추이",
                 "증감수(명)",
-                shared_x_scale,
+                None,
             ),
             use_container_width=True,
         )
