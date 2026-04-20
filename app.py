@@ -4,17 +4,12 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from src.data import (
-    build_load_result,
-    fetch_ggdata_middle_category_records,
-    fetch_ggdata_publication_use_records,
-    normalize_publication_use_frame,
-)
+from src.data import fetch_ggdata_publication_use_records, normalize_publication_use_frame
 from src.settings import get_access_code, get_app_key
 
 
 st.set_page_config(
-    page_title="경기도 지역화폐 월별 소비·운영 현황",
+    page_title="경기도 지역화폐 발행·이용 현황",
     page_icon="LC",
     layout="wide",
 )
@@ -63,40 +58,22 @@ def require_access_code() -> None:
     st.stop()
 
 
-def _load_data_with_progress(app_key: str):
+def load_operation_with_progress(app_key: str) -> pd.DataFrame:
     status = st.empty()
     progress = st.progress(0)
-    stage_weights = {
-        "sales": (0, 85),
-        "operation": (85, 15),
-    }
 
-    def update(stage: str, service: str, done: int, total: int) -> None:
-        start, weight = stage_weights[stage]
+    def update(_service: str, done: int, total: int) -> None:
         safe_total = max(total, 1)
-        percent = min(99, start + int(weight * done / safe_total))
-        label = "매출 데이터" if stage == "sales" else "운영 현황"
-        status.info(f"{label} 불러오는 중... ({done:,}/{safe_total:,} 페이지)")
+        percent = min(99, int(100 * done / safe_total))
+        status.info(f"운영 현황 데이터를 불러오는 중... ({done:,}/{safe_total:,} 페이지)")
         progress.progress(percent)
 
     try:
-        sales_records = fetch_ggdata_middle_category_records(
-            app_key,
-            progress_callback=lambda service, done, total: update("sales", service, done, total),
-        )
-        sales = build_load_result(
-            pd.DataFrame(sales_records),
-            "경기데이터드림 Open API 카드업종중분류 매출",
-        )
-
-        operation_records = fetch_ggdata_publication_use_records(
-            app_key,
-            progress_callback=lambda service, done, total: update("operation", service, done, total),
-        )
-        operation = normalize_publication_use_frame(pd.DataFrame(operation_records))
+        records = fetch_ggdata_publication_use_records(app_key, progress_callback=update)
+        operation = normalize_publication_use_frame(pd.DataFrame(records))
         progress.progress(100)
         status.success("데이터 로딩 완료")
-        return sales, operation
+        return operation
     finally:
         progress.empty()
         status.empty()
@@ -136,7 +113,7 @@ def chart_bar(
             x=alt.X(f"{x_col}:Q", title=x_title),
             y=alt.Y(f"{y_col}:N", sort="-x", title=""),
             tooltip=[
-                alt.Tooltip(f"{y_col}:N", title="구분"),
+                alt.Tooltip(f"{y_col}:N", title="시군"),
                 alt.Tooltip(f"{x_col}:Q", title=x_title, format=",.0f"),
             ],
         )
@@ -144,7 +121,7 @@ def chart_bar(
     )
 
 
-def trend_chart(frame: pd.DataFrame, y_col: str, title: str, y_title: str, color: str):
+def trend_line(frame: pd.DataFrame, y_col: str, title: str, y_title: str, color: str):
     return (
         alt.Chart(frame, title=title)
         .mark_line(point=True, color=color)
@@ -162,8 +139,8 @@ def trend_chart(frame: pd.DataFrame, y_col: str, title: str, y_title: str, color
 
 require_access_code()
 
-st.title("경기도 지역화폐 월별 소비·운영 현황")
-st.caption("지역화폐 매출을 업종·지역별로 보고, 충전액·사용액·월별 신규가입자 흐름을 함께 확인합니다.")
+st.title("경기도 지역화폐 발행·이용 현황")
+st.caption("최신 월별 신규가입자수, 충전액, 사용액을 시군 단위로 확인합니다.")
 
 with st.sidebar:
     st.subheader("데이터")
@@ -172,7 +149,6 @@ with st.sidebar:
         st.success("APP_KEY 설정됨")
         if st.button("데이터 새로고침"):
             st.session_state.pop("_loaded_app_key", None)
-            st.session_state.pop("_loaded_sales_result", None)
             st.session_state.pop("_loaded_operation", None)
             st.rerun()
     else:
@@ -181,114 +157,79 @@ with st.sidebar:
 if not app_key:
     st.stop()
 
-if (
-    st.session_state.get("_loaded_app_key") == app_key
-    and "_loaded_sales_result" in st.session_state
-    and "_loaded_operation" in st.session_state
-):
-    sales_result = st.session_state["_loaded_sales_result"]
+if st.session_state.get("_loaded_app_key") == app_key and "_loaded_operation" in st.session_state:
     operation = st.session_state["_loaded_operation"]
 else:
     try:
-        sales_result, operation = _load_data_with_progress(app_key)
+        operation = load_operation_with_progress(app_key)
         st.session_state["_loaded_app_key"] = app_key
-        st.session_state["_loaded_sales_result"] = sales_result
         st.session_state["_loaded_operation"] = operation
     except Exception as exc:  # noqa: BLE001
         st.error(str(exc))
         st.stop()
 
-sales = sales_result.frame
-if sales_result.missing_required:
-    st.error("매출 데이터 필수 컬럼을 찾지 못했습니다.")
-    st.write("누락:", ", ".join(sales_result.missing_required))
-    st.write("원본 컬럼:", ", ".join(sales_result.original_columns))
-    st.stop()
-
-if sales.empty:
-    st.warning("분석 가능한 매출 데이터가 없습니다.")
+if operation.empty:
+    st.warning("분석 가능한 데이터가 없습니다.")
     st.stop()
 
 with st.sidebar:
-    st.caption(f"매출: {sales_result.source_name}")
-    st.caption("운영: 경기데이터드림 Open API 발행 및 이용 현황")
-
-    common_periods = sorted(
-        set(sales["period_key"].dropna().unique()) & set(operation["period_key"].dropna().unique()),
-        reverse=True,
-    )
-    fallback_periods = sorted(sales["period_key"].dropna().unique(), reverse=True)
-    period_options = common_periods or fallback_periods
+    st.caption("소스: 경기데이터드림 Open API 지역화폐 발행 및 이용 현황")
+    period_options = sorted(operation["period_key"].dropna().unique(), reverse=True)
     selected_period = st.selectbox("기준년월", period_options)
 
-    region_options = sorted([x for x in sales["region_name"].dropna().unique() if x])
-    industry_options = sorted([x for x in sales["industry_name"].dropna().unique() if x])
-    selected_regions = st.multiselect("지역(읍면동코드)", region_options, placeholder="전체")
-    selected_industries = st.multiselect("업종", industry_options, placeholder="전체")
+    sigun_options = sorted([x for x in operation["sigun_name"].dropna().unique() if x])
+    selected_siguns = st.multiselect("시군", sigun_options, placeholder="전체")
 
-filtered_sales = sales.copy()
-if selected_regions:
-    filtered_sales = filtered_sales[filtered_sales["region_name"].isin(selected_regions)]
-if selected_industries:
-    filtered_sales = filtered_sales[filtered_sales["industry_name"].isin(selected_industries)]
+filtered = operation.copy()
+if selected_siguns:
+    filtered = filtered[filtered["sigun_name"].isin(selected_siguns)]
 
-if filtered_sales.empty:
-    st.warning("선택한 조건의 매출 데이터가 없습니다.")
+if filtered.empty:
+    st.warning("선택한 조건의 데이터가 없습니다.")
     st.stop()
 
-current_sales = filtered_sales[filtered_sales["period_key"] == selected_period].copy()
-current_operation = operation[operation["period_key"] == selected_period].copy()
+current = filtered[filtered["period_key"] == selected_period].copy()
 
-total_sales = float(current_sales["sales_amount"].sum())
-total_new_members = float(current_operation["new_member_count"].sum()) if not current_operation.empty else float("nan")
-total_charge_million = (
-    float(current_operation["charge_amount_million"].sum()) if not current_operation.empty else float("nan")
-)
-total_use_million = (
-    float(current_operation["use_amount_million"].sum()) if not current_operation.empty else float("nan")
+total_new_members = float(current["new_member_count"].sum()) if not current.empty else float("nan")
+total_charge_million = float(current["charge_amount_million"].sum()) if not current.empty else float("nan")
+total_use_million = float(current["use_amount_million"].sum()) if not current.empty else float("nan")
+use_to_charge_rate = (
+    total_use_million / total_charge_million * 100
+    if not pd.isna(total_charge_million) and total_charge_million != 0
+    else float("nan")
 )
 
 kpi_cols = st.columns(4)
-kpi_cols[0].metric("총 지역화폐 매출", fmt_money(total_sales))
-kpi_cols[1].metric("월별 신규가입자수", "-" if pd.isna(total_new_members) else f"{total_new_members:,.0f}명")
-kpi_cols[2].metric("월별 충전액", fmt_million_money(total_charge_million))
-kpi_cols[3].metric("월별 사용액", fmt_million_money(total_use_million))
+kpi_cols[0].metric("월별 신규가입자수", "-" if pd.isna(total_new_members) else f"{total_new_members:,.0f}명")
+kpi_cols[1].metric("월별 충전액", fmt_million_money(total_charge_million))
+kpi_cols[2].metric("월별 사용액", fmt_million_money(total_use_million))
+kpi_cols[3].metric("사용액/충전액", "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%")
 
-tab_summary, tab_sales, tab_operation = st.tabs(["요약", "업종·지역", "운영 현황"])
+tab_summary, tab_trend, tab_sigun = st.tabs(["요약", "월별 추이", "시군별 현황"])
+
+trend = (
+    filtered.groupby(["period_key", "period_date"], as_index=False)[
+        ["new_member_count", "charge_amount_million", "use_amount_million"]
+    ]
+    .sum()
+    .sort_values("period_date")
+)
 
 with tab_summary:
-    sales_trend = (
-        filtered_sales.groupby(["period_key", "period_date"], as_index=False)["sales_amount"]
-        .sum()
-        .sort_values("period_date")
-    )
-    operation_trend = (
-        operation.groupby(["period_key", "period_date"], as_index=False)[
-            ["charge_amount_million", "use_amount_million", "new_member_count"]
-        ]
-        .sum()
-        .sort_values("period_date")
-    )
-
-    st.altair_chart(
-        trend_chart(sales_trend, "sales_amount", "월별 지역화폐 매출 추이", "매출금액", "#0f766e"),
-        use_container_width=True,
-    )
-
-    operation_long = operation_trend.melt(
+    amount_long = trend.melt(
         id_vars=["period_key", "period_date"],
         value_vars=["charge_amount_million", "use_amount_million"],
         var_name="metric",
         value_name="amount_million",
     )
-    operation_long["metric_name"] = operation_long["metric"].map(
+    amount_long["metric_name"] = amount_long["metric"].map(
         {
             "charge_amount_million": "충전액",
             "use_amount_million": "사용액",
         }
     )
-    op_chart = (
-        alt.Chart(operation_long, title="월별 충전액·사용액 추이")
+    amount_chart = (
+        alt.Chart(amount_long, title="월별 충전액·사용액 추이")
         .mark_line(point=True)
         .encode(
             x=alt.X("period_date:T", title="기준월"),
@@ -300,136 +241,81 @@ with tab_summary:
                 alt.Tooltip("amount_million:Q", title="금액(백만원)", format=",.0f"),
             ],
         )
-        .properties(height=330)
+        .properties(height=340)
     )
-    st.altair_chart(op_chart, use_container_width=True)
+    st.altair_chart(amount_chart, use_container_width=True)
 
+    sigun_rank = (
+        current.groupby("sigun_name", as_index=False)[
+            ["new_member_count", "charge_amount_million", "use_amount_million"]
+        ]
+        .sum()
+        .sort_values("use_amount_million", ascending=False)
+    )
     left, right = st.columns(2)
-    region_rank = (
-        current_sales.groupby("region_name", as_index=False)["sales_amount"]
-        .sum()
-        .sort_values("sales_amount", ascending=False)
-    )
-    industry_rank = (
-        current_sales.groupby("industry_name", as_index=False)["sales_amount"]
-        .sum()
-        .sort_values("sales_amount", ascending=False)
-    )
     left.altair_chart(
-        chart_bar(region_rank, "sales_amount", "region_name", "지역별 매출 Top 10", "매출금액", 10, "#1d4ed8"),
+        chart_bar(sigun_rank, "use_amount_million", "sigun_name", "시군별 사용액 Top 10", "사용액(백만원)", 10, "#0f766e"),
         use_container_width=True,
     )
     right.altair_chart(
-        chart_bar(industry_rank, "sales_amount", "industry_name", "업종별 매출 Top 10", "매출금액", 10, "#b45309"),
+        chart_bar(
+            sigun_rank.sort_values("charge_amount_million", ascending=False),
+            "charge_amount_million",
+            "sigun_name",
+            "시군별 충전액 Top 10",
+            "충전액(백만원)",
+            10,
+            "#7c3aed",
+        ),
         use_container_width=True,
     )
 
-with tab_sales:
-    region_rank = (
-        current_sales.groupby("region_name", as_index=False)["sales_amount"]
-        .sum()
-        .sort_values("sales_amount", ascending=False)
+with tab_trend:
+    st.altair_chart(
+        trend_line(trend, "use_amount_million", "월별 사용액 추이", "사용액(백만원)", "#0f766e"),
+        use_container_width=True,
     )
-    industry_rank = (
-        current_sales.groupby("industry_name", as_index=False)["sales_amount"]
-        .sum()
-        .sort_values("sales_amount", ascending=False)
+    st.altair_chart(
+        trend_line(trend, "charge_amount_million", "월별 충전액 추이", "충전액(백만원)", "#7c3aed"),
+        use_container_width=True,
+    )
+    st.altair_chart(
+        trend_line(trend, "new_member_count", "월별 신규가입자수 추이", "신규가입자수", "#64748b"),
+        use_container_width=True,
     )
 
+with tab_sigun:
+    sigun_rank = (
+        current.groupby("sigun_name", as_index=False)[
+            ["new_member_count", "charge_amount_million", "use_amount_million"]
+        ]
+        .sum()
+        .sort_values("use_amount_million", ascending=False)
+    )
     left, right = st.columns(2)
     left.altair_chart(
-        chart_bar(region_rank, "sales_amount", "region_name", "지역별 매출 순위", "매출금액", 25, "#1d4ed8"),
+        chart_bar(sigun_rank, "use_amount_million", "sigun_name", "시군별 사용액 순위", "사용액(백만원)", 31, "#0f766e"),
         use_container_width=True,
     )
     right.altair_chart(
-        chart_bar(industry_rank, "sales_amount", "industry_name", "업종별 매출 순위", "매출금액", 25, "#b45309"),
-        use_container_width=True,
-    )
-
-    heat_regions = region_rank.head(15)["region_name"].tolist()
-    heat_industries = industry_rank.head(10)["industry_name"].tolist()
-    heat = current_sales[
-        current_sales["region_name"].isin(heat_regions)
-        & current_sales["industry_name"].isin(heat_industries)
-    ]
-    if not heat.empty:
-        heat = heat.groupby(["region_name", "industry_name"], as_index=False)["sales_amount"].sum()
-        heat_chart = (
-            alt.Chart(heat, title="지역 x 업종 매출 히트맵")
-            .mark_rect()
-            .encode(
-                x=alt.X("industry_name:N", title="업종"),
-                y=alt.Y("region_name:N", title="지역", sort=heat_regions),
-                color=alt.Color("sales_amount:Q", title="매출금액", scale=alt.Scale(scheme="tealblues")),
-                tooltip=[
-                    alt.Tooltip("region_name:N", title="지역"),
-                    alt.Tooltip("industry_name:N", title="업종"),
-                    alt.Tooltip("sales_amount:Q", title="매출금액", format=",.0f"),
-                ],
-            )
-            .properties(height=430)
-        )
-        st.altair_chart(heat_chart, use_container_width=True)
-
-    st.dataframe(
-        current_sales.sort_values("sales_amount", ascending=False),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-with tab_operation:
-    if current_operation.empty:
-        st.info("선택한 기준월의 운영 현황 데이터가 없습니다.")
-    else:
-        operation_rank = (
-            current_operation.groupby("sigun_name", as_index=False)[
-                ["new_member_count", "charge_amount_million", "use_amount_million"]
-            ]
-            .sum()
-            .sort_values("use_amount_million", ascending=False)
-        )
-
-        left, right = st.columns(2)
-        left.altair_chart(
-            chart_bar(
-                operation_rank,
-                "use_amount_million",
-                "sigun_name",
-                "시군별 사용액 Top 10",
-                "사용액(백만원)",
-                10,
-                "#0f766e",
-            ),
-            use_container_width=True,
-        )
-        right.altair_chart(
-            chart_bar(
-                operation_rank.sort_values("charge_amount_million", ascending=False),
-                "charge_amount_million",
-                "sigun_name",
-                "시군별 충전액 Top 10",
-                "충전액(백만원)",
-                10,
-                "#7c3aed",
-            ),
-            use_container_width=True,
-        )
-
-        member_chart = trend_chart(
-            operation_trend,
+        chart_bar(
+            sigun_rank.sort_values("new_member_count", ascending=False),
             "new_member_count",
-            "월별 신규가입자수 추이",
+            "sigun_name",
+            "시군별 신규가입자수 순위",
             "신규가입자수",
+            31,
             "#64748b",
-        )
-        st.altair_chart(member_chart, use_container_width=True)
+        ),
+        use_container_width=True,
+    )
 
-        display_rank = operation_rank.rename(
-            columns={
-                "sigun_name": "시군명",
-                "new_member_count": "월별 신규가입자수",
-                "charge_amount_million": "월별 충전액(백만원)",
-                "use_amount_million": "월별 사용액(백만원)",
-            }
-        )
-        st.dataframe(display_rank, use_container_width=True, hide_index=True)
+    display = sigun_rank.rename(
+        columns={
+            "sigun_name": "시군명",
+            "new_member_count": "월별 신규가입자수",
+            "charge_amount_million": "월별 충전액(백만원)",
+            "use_amount_million": "월별 사용액(백만원)",
+        }
+    )
+    st.dataframe(display, use_container_width=True, hide_index=True)
