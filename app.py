@@ -774,59 +774,15 @@ with tab_diag:
         horizontal=True,
     )
     metric_col, _metric_label = metric_map[diag_metric]
-    st.markdown("#### 분석기간 기반 진단")
-    diag_window_name = st.radio(
-        "분석 기간",
-        list(period_window_map.keys()),
-        index=1,
-        key="diag_window",
-        horizontal=True,
-    )
-    window_months = period_window_map[diag_window_name]
-    diag_base = build_windowed_sigun_metric(
-        filtered[["sigun_name", "period_key", "period_date", metric_col]].copy(),
-        metric_col,
-        selected_period,
-        window_months,
-    )
-    st.caption(f"기준년월: {fmt_period_label(selected_period)} / 분석기간: {diag_window_name}")
-
-    st.markdown("#### 변동성(CV=표준편차/평균)")
-    st.caption("CV 낮음 = 평균 대비 변동이 작아 상대적으로 안정적 / CV 높음 = 평균 대비 변동이 커 상대적으로 변동 큼")
-    volatility = compute_volatility_rank(diag_base, metric_col)
-    if volatility.empty:
-        st.info("변동성을 계산할 데이터가 부족합니다.")
-    else:
-        left, right = st.columns(2)
-        left.altair_chart(
-            chart_bar(
-                volatility,
-                "cv_pct",
-                "sigun_name",
-                "안정 Top 5 (CV 낮음)",
-                "CV(%)",
-                limit=5,
-                color="#5b8db8",
-                value_format=",.2f",
-            ),
-            use_container_width=True,
-        )
-        right.altair_chart(
-            chart_bar(
-                volatility.sort_values("cv_pct", ascending=False),
-                "cv_pct",
-                "sigun_name",
-                "변동 Top 5 (CV 높음)",
-                "CV(%)",
-                limit=5,
-                color="#c97b7b",
-                value_format=",.2f",
-            ),
-            use_container_width=True,
-        )
 
     st.markdown("#### 최근 연속 증가/감소")
-    streaks = compute_current_streaks(diag_base, metric_col)
+    streak_base = (
+        filtered[["sigun_name", "period_key", "period_date", metric_col]]
+        .loc[lambda d: d["period_date"] <= filtered.loc[filtered["period_key"] == selected_period, "period_date"].max()]
+        .dropna(subset=["sigun_name", metric_col])
+        .sort_values(["sigun_name", "period_date"])
+    )
+    streaks = compute_current_streaks(streak_base, metric_col)
     if streaks.empty:
         st.info("연속 증가/감소를 계산할 데이터가 부족합니다.")
     else:
@@ -909,6 +865,58 @@ with tab_diag:
                 ),
                 use_container_width=True,
             )
+
+    st.markdown("---")
+    st.markdown("#### 분석기간 기반 진단")
+    diag_window_name = st.radio(
+        "분석 기간",
+        list(period_window_map.keys()),
+        index=1,
+        key="diag_window",
+        horizontal=True,
+    )
+    window_months = period_window_map[diag_window_name]
+    diag_base = build_windowed_sigun_metric(
+        filtered[["sigun_name", "period_key", "period_date", metric_col]].copy(),
+        metric_col,
+        selected_period,
+        window_months,
+    )
+    st.caption(f"기준년월: {fmt_period_label(selected_period)} / 분석기간: {diag_window_name}")
+
+    st.markdown("#### 변동성(CV=표준편차/평균)")
+    st.caption("CV 낮음 = 평균 대비 변동이 작아 상대적으로 안정적 / CV 높음 = 평균 대비 변동이 커 상대적으로 변동 큼")
+    volatility = compute_volatility_rank(diag_base, metric_col)
+    if volatility.empty:
+        st.info("변동성을 계산할 데이터가 부족합니다.")
+    else:
+        left, right = st.columns(2)
+        left.altair_chart(
+            chart_bar(
+                volatility,
+                "cv_pct",
+                "sigun_name",
+                "안정 Top 5 (CV 낮음)",
+                "CV(%)",
+                limit=5,
+                color="#5b8db8",
+                value_format=",.2f",
+            ),
+            use_container_width=True,
+        )
+        right.altair_chart(
+            chart_bar(
+                volatility.sort_values("cv_pct", ascending=False),
+                "cv_pct",
+                "sigun_name",
+                "변동 Top 5 (CV 높음)",
+                "CV(%)",
+                limit=5,
+                color="#c97b7b",
+                value_format=",.2f",
+            ),
+            use_container_width=True,
+        )
 
 with tab_sigun:
     st.caption(f"기준년월: {fmt_period_label(selected_period)}")
