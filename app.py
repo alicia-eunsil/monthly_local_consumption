@@ -5,14 +5,10 @@ import pandas as pd
 import streamlit as st
 
 from src.data import (
-    fetch_ggdata_industry_sales_records,
     fetch_ggdata_publication_use_records,
-    normalize_industry_sales_frame,
     normalize_publication_use_frame,
 )
-from src.settings import get_access_code, get_app_key, get_industry_service
-
-DEFAULT_INDUSTRY_SERVICE = "REGIONMNYAGEGND"
+from src.settings import get_access_code, get_app_key
 
 
 st.set_page_config(
@@ -85,39 +81,6 @@ def load_operation_with_progress(app_key: str) -> pd.DataFrame:
         progress.empty()
         status.empty()
 
-
-def load_industry_with_progress(app_key: str, industry_service: str) -> tuple[pd.DataFrame, str, str]:
-    status = st.empty()
-    progress = st.progress(0)
-
-    def update_industry(_service: str, done: int, total: int) -> None:
-        safe_total = max(total, 1)
-        percent = min(99, int(100 * done / safe_total))
-        status.info(f"성연령 매출 데이터를 불러오는 중... ({done:,}/{safe_total:,} 페이지)")
-        progress.progress(percent)
-
-    try:
-        try:
-            service_used, industry_records = fetch_ggdata_industry_sales_records(
-                app_key,
-                service_override=industry_service,
-                progress_callback=update_industry,
-            )
-            industry = normalize_industry_sales_frame(pd.DataFrame(industry_records))
-            industry_error = ""
-        except Exception as exc:  # noqa: BLE001
-            service_used = ""
-            industry = pd.DataFrame()
-            industry_error = str(exc)
-        progress.progress(100)
-        if industry.empty:
-            status.warning("성연령 매출 로딩 실패")
-        else:
-            status.success("성연령 매출 로딩 완료")
-        return industry, service_used, industry_error
-    finally:
-        progress.empty()
-        status.empty()
 
 
 def fmt_money(value: float) -> str:
@@ -236,20 +199,6 @@ def add_yoy_columns(frame: pd.DataFrame) -> pd.DataFrame:
         out[f"{col}_yoy_pct"] = out[f"{col}_yoy_abs"] / prev.where(prev != 0) * 100
     return out
 
-
-def add_industry_change_columns(frame: pd.DataFrame) -> pd.DataFrame:
-    out = frame.sort_values("period_date").copy()
-    parts = []
-    for _, group in out.groupby("lgclass_indtype_name", dropna=False):
-        g = group.sort_values("period_date").copy()
-        prev_m = g["sales_amount"].shift(1)
-        prev_y = g["sales_amount"].shift(12)
-        g["mom_abs"] = g["sales_amount"] - prev_m
-        g["mom_pct"] = g["mom_abs"] / prev_m.where(prev_m != 0) * 100
-        g["yoy_abs"] = g["sales_amount"] - prev_y
-        g["yoy_pct"] = g["yoy_abs"] / prev_y.where(prev_y != 0) * 100
-        parts.append(g)
-    return pd.concat(parts, ignore_index=True) if parts else out
 
 
 def add_sigun_yoy_columns(frame: pd.DataFrame) -> pd.DataFrame:
@@ -415,22 +364,11 @@ st.caption("최신 월별 신규가입자수, 충전액, 사용액을 시군 단
 with st.sidebar:
     st.subheader("데이터")
     app_key = get_app_key()
-    industry_service = get_industry_service() or DEFAULT_INDUSTRY_SERVICE
-    industry_service_input = st.text_input(
-        "성연령 API 서비스명(선택)",
-        value=industry_service,
-        help="명세서의 요청주소 끝 서비스명만 입력하세요. 예: TBDASSIGNRMSALESSEXAGES",
-    ).strip()
-    effective_industry_service = industry_service_input or DEFAULT_INDUSTRY_SERVICE
     if app_key:
         st.success("APP_KEY 설정됨")
         if st.button("데이터 새로고침"):
             st.session_state.pop("_loaded_app_key", None)
             st.session_state.pop("_loaded_operation", None)
-            st.session_state.pop("_loaded_industry", None)
-            st.session_state.pop("_loaded_industry_service_used", None)
-            st.session_state.pop("_industry_error", None)
-            st.session_state.pop("_loaded_industry_service", None)
             st.rerun()
     else:
         st.error("APP_KEY가 필요합니다.")
@@ -440,17 +378,11 @@ if not app_key:
 
 if st.session_state.get("_loaded_app_key") == app_key and "_loaded_operation" in st.session_state:
     operation = st.session_state["_loaded_operation"]
-    industry = st.session_state.get("_loaded_industry", pd.DataFrame())
-    industry_service_used = st.session_state.get("_loaded_industry_service_used", "")
-    industry_error = st.session_state.get("_industry_error", "")
 else:
     try:
         operation = load_operation_with_progress(app_key)
         st.session_state["_loaded_app_key"] = app_key
         st.session_state["_loaded_operation"] = operation
-        industry = st.session_state.get("_loaded_industry", pd.DataFrame())
-        industry_service_used = st.session_state.get("_loaded_industry_service_used", "")
-        industry_error = st.session_state.get("_industry_error", "")
     except Exception as exc:  # noqa: BLE001
         operation = pd.DataFrame()
         st.error(str(exc))
@@ -462,8 +394,6 @@ if operation.empty:
 
 with st.sidebar:
     st.caption("소스: 경기데이터드림 Open API 지역화폐 발행 및 이용 현황")
-    if industry_service_used:
-        st.caption(f"업종 API: {industry_service_used}")
     period_options = sorted(operation["period_key"].dropna().unique(), reverse=True)
     selected_period = st.selectbox("기준년월", period_options)
 
@@ -538,7 +468,7 @@ kpi_cols[2].metric(
 )
 kpi_cols[3].metric("사용액/충전액", "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%")
 
-tab_summary, tab_trend, tab_industry, tab_sigun = st.tabs(["요약", "월별 추이", "성연령별 매출", "시군별 현황"])
+tab_summary, tab_trend, tab_sigun = st.tabs(["요약", "월별 추이", "시군별 현황"])
 
 with tab_summary:
     amount_long = trend.melt(
@@ -682,118 +612,6 @@ with tab_trend:
             "월데이터(명)",
             "전년동월대비 증감(명)",
         )
-
-with tab_industry:
-    service_changed = st.session_state.get("_loaded_industry_service") != effective_industry_service
-    if service_changed:
-        st.session_state.pop("_loaded_industry", None)
-        st.session_state.pop("_loaded_industry_service_used", None)
-        st.session_state.pop("_industry_error", None)
-        st.session_state["_loaded_industry_service"] = effective_industry_service
-        industry = pd.DataFrame()
-        industry_service_used = ""
-        industry_error = ""
-
-    load_label = "성연령 데이터 다시 불러오기" if not industry.empty else "성연령 데이터 불러오기"
-    if st.button(load_label, key="load_industry_button"):
-        loaded_industry, used_service, load_error = load_industry_with_progress(app_key, effective_industry_service)
-        st.session_state["_loaded_industry"] = loaded_industry
-        st.session_state["_loaded_industry_service_used"] = used_service
-        st.session_state["_industry_error"] = load_error
-        st.session_state["_loaded_industry_service"] = effective_industry_service
-        st.rerun()
-
-    if industry.empty:
-        st.info("성연령별 매출 데이터는 버튼을 눌렀을 때만 로딩합니다.")
-        if industry_error:
-            st.caption(industry_error)
-        st.caption("명세서의 요청주소 끝 서비스명을 사이드바에 넣으면 더 정확하게 로딩할 수 있습니다.")
-    else:
-        if industry_service_used:
-            st.caption(f"성연령 API 서비스명: {industry_service_used}")
-        st.caption(f"데이터 기준 최신월: {fmt_period_label(industry['period_key'].max())}")
-        industry_period_options = sorted(industry["period_key"].dropna().unique(), reverse=True)
-        default_index = 0
-        if selected_period in industry_period_options:
-            default_index = industry_period_options.index(selected_period)
-
-        control_left, control_mid, control_right = st.columns([2, 3, 1])
-        with control_left:
-            selected_industry_period = st.selectbox(
-                "성연령 기준년월",
-                options=industry_period_options,
-                index=default_index,
-                key="industry_period",
-            )
-        with control_mid:
-            industry_sigun_options = sorted([x for x in industry["sigun_name"].dropna().unique() if x])
-            selected_industry_siguns = st.multiselect(
-                "시군(성연령)",
-                options=industry_sigun_options,
-                default=[],
-                key="industry_siguns",
-                placeholder="전체",
-            )
-        with control_right:
-            top_n = int(st.number_input("Top N", min_value=5, max_value=30, value=10, step=1))
-
-        industry_base = industry.copy()
-        if selected_industry_siguns:
-            industry_base = industry_base[industry_base["sigun_name"].isin(selected_industry_siguns)]
-
-        current_industry = industry_base[industry_base["period_key"] == selected_industry_period].copy()
-        if current_industry.empty:
-            st.warning("선택한 기준년월의 성연령 데이터가 없습니다.")
-        else:
-            rank = (
-                current_industry.groupby("segment_name", as_index=False)
-                .agg(
-                    {
-                        "sales_amount": "sum",
-                        "payment_count": "sum",
-                        "avg_payment_amount": "mean",
-                    }
-                )
-                .sort_values("sales_amount", ascending=False)
-            )
-            total_sales = float(rank["sales_amount"].sum()) if not rank.empty else 0.0
-            rank["sales_share_pct"] = rank["sales_amount"] / total_sales * 100 if total_sales > 0 else 0.0
-            st.altair_chart(
-                chart_bar(
-                    rank,
-                    "sales_amount",
-                    "segment_name",
-                    f"성연령별 매출 Top {top_n}",
-                    "매출액",
-                    limit=top_n,
-                    color="#0f766e",
-                ),
-                use_container_width=True,
-            )
-
-            st.dataframe(
-                rank.head(top_n)
-                .rename(
-                    columns={
-                        "segment_name": "성연령구분",
-                        "sales_amount": "매출액",
-                        "sales_share_pct": "매출비율(%)",
-                        "payment_count": "결제건수",
-                        "avg_payment_amount": "1회평균결제금액",
-                    }
-                )
-                .style.format(
-                    {
-                        "매출액": "{:,.0f}",
-                        "매출비율(%)": "{:,.2f}",
-                        "결제건수": "{:,.0f}",
-                        "1회평균결제금액": "{:,.0f}",
-                    },
-                    na_rep="-",
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
 
 with tab_sigun:
     st.caption(f"기준년월: {fmt_period_label(selected_period)}")

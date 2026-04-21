@@ -13,17 +13,10 @@ import pandas as pd
 
 GGDATA_BASE_URL = "https://openapi.gg.go.kr"
 PUBLICATION_USE_SERVICE = "RegionMnyPublctUse"
-INDUSTRY_SALES_SERVICE_CANDIDATES = [
-    "REGIONMNYAGEGND",
-]
 MAX_PAGE_SIZE = 1000
 MAX_WORKERS = 8
 REQUEST_TIMEOUT_SECONDS = 120
 REQUEST_RETRIES = 3
-INDUSTRY_MAX_WORKERS = 3
-INDUSTRY_REQUEST_TIMEOUT_SECONDS = 90
-INDUSTRY_REQUEST_RETRIES = 4
-INDUSTRY_PAGE_SIZE_CANDIDATES = [500, 300, 200, 100]
 
 ProgressCallback = Callable[[str, int, int], None]
 
@@ -39,116 +32,6 @@ def fetch_ggdata_publication_use_records(
         page_size=page_size,
         progress_callback=progress_callback,
     )
-
-
-def fetch_ggdata_industry_sales_records(
-    app_key: str,
-    service_override: str = "",
-    page_size: int = INDUSTRY_PAGE_SIZE_CANDIDATES[0],
-    progress_callback: ProgressCallback | None = None,
-) -> tuple[str, list[dict]]:
-    candidates: list[str] = []
-    if service_override and service_override.strip():
-        candidates.append(service_override.strip())
-    for service in INDUSTRY_SALES_SERVICE_CANDIDATES:
-        if service not in candidates:
-            candidates.append(service)
-
-    attempt_logs: list[str] = []
-    last_error: Exception | None = None
-    for service in candidates:
-        sizes = [int(page_size)] + [s for s in INDUSTRY_PAGE_SIZE_CANDIDATES if s != int(page_size)]
-        tried_timeout = False
-        for size in sizes:
-            try:
-                rows = fetch_ggdata_records(
-                    service,
-                    app_key,
-                    page_size=size,
-                    progress_callback=progress_callback,
-                    max_workers=INDUSTRY_MAX_WORKERS,
-                    timeout_seconds=INDUSTRY_REQUEST_TIMEOUT_SECONDS,
-                    retries=INDUSTRY_REQUEST_RETRIES,
-                )
-                if not rows:
-                    attempt_logs.append(f"{service}(pSize={size}): 행 데이터 없음")
-                    break
-                columns = {str(col).strip() for col in rows[0].keys()}
-                keys = {_normalize_key(col) for col in columns}
-                has_period = ("STDYM" in keys) or ("STDYY" in keys)
-                has_sales = ("SALESAMT" in keys) or ("CMPTAMT" in keys)
-                has_name = any(
-                    key in keys
-                    for key in {
-                        "SEXDIV",
-                        "AGEDIV",
-                        "LGCLASSINDTYPENM",
-                        "LGCLASSINDUTYPENM",
-                        "LGLASSINDTYPENM",
-                        "LGLASSINDUTYPENM",
-                        "LCLASSINDTYPENM",
-                        "LCLASSINDUTYPENM",
-                        "LGCLSINDTYPENM",
-                        "LGCLSINDUTYPENM",
-                        "INDTYPENM",
-                        "INDUTYPENM",
-                        "CATLNM",
-                        "CATEGORYNM",
-                        "CATGNM",
-                        "UPTAENM",
-                    }
-                )
-                has_code = any(
-                    key in keys
-                    for key in {
-                        "SEXAGECD",
-                        "SIGNCD",
-                        "MDCLASSINDTYPECD",
-                        "MDCLASSINDUTYPECD",
-                        "LGCLASSINDTYPECD",
-                        "LGCLASSINDUTYPECD",
-                        "INDTYPECD",
-                        "INDUTYPECD",
-                        "CATLCD",
-                        "CATEGORYCD",
-                        "CATGCD",
-                    }
-                )
-                if has_period and has_sales and (has_name or has_code):
-                    return service, rows
-                missing_tokens = []
-                if not has_period:
-                    missing_tokens.append("STD_YM or STD_YY")
-                if not has_sales:
-                    missing_tokens.append("SALES_AMT or CMPT_AMT")
-                if not (has_name or has_code):
-                    missing_tokens.append("SEX_AGE_CD or AGE_DIV/SEX_DIV")
-                sample_cols = ", ".join(sorted(columns)[:12])
-                attempt_logs.append(
-                    f"{service}(pSize={size}): 필수 컬럼 누락({', '.join(missing_tokens)})"
-                    + (f" / 응답 컬럼({sample_cols})" if sample_cols else "")
-                )
-                break
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                message = str(exc).strip()
-                lower_message = message.lower()
-                if "timed out" in lower_message or "read operation timed out" in lower_message:
-                    tried_timeout = True
-                    attempt_logs.append(f"{service}(pSize={size}): 타임아웃")
-                    continue
-                attempt_logs.append(f"{service}(pSize={size}): 호출 실패({message})")
-                break
-        if tried_timeout:
-            attempt_logs.append(f"{service}: pSize 축소 재시도 완료")
-
-    hint = ", ".join(candidates)
-    details = " | ".join(attempt_logs[:7])
-    raise RuntimeError(
-        "성연령별 매출 API를 찾지 못했습니다. "
-        f"입력한 서비스명/후보 서비스명을 확인해 주세요. ({hint})"
-        + (f" / 상세: {details}" if details else "")
-    ) from last_error
 
 
 def fetch_ggdata_records(
@@ -236,111 +119,6 @@ def normalize_publication_use_frame(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
-    source = df.copy()
-    source.columns = [str(col).strip() for col in source.columns]
-
-    period_col = _find_column(source.columns, ["STD_YM", "STD_YY"])
-    sales_col = _find_column(source.columns, ["SALES_AMT", "CMPT_AMT"])
-    name_col = _find_column(
-        source.columns,
-        [
-            "SEX_AGE_CD",
-            "AGE_DIV",
-            "SEX_DIV",
-            "LGCLASS_INDTYPE_NM",
-            "LGCLASS_INDUTYPE_NM",
-            "LGLASS_INDTYPE_NM",
-            "LGLASS_INDUTYPE_NM",
-            "LCLASS_INDTYPE_NM",
-            "LCLASS_INDUTYPE_NM",
-            "LGCLS_INDTYPE_NM",
-            "LGCLS_INDUTYPE_NM",
-            "CATL_NM",
-            "CATEGORY_NM",
-            "CATG_NM",
-            "UPTAE_NM",
-        ],
-        contains=["NM"],
-    )
-    code_col = _find_column(
-        source.columns,
-        [
-            "SEX_AGE_CD",
-            "SEX_DIV",
-            "AGE_DIV",
-            "MDCLASS_INDTYPE_CD",
-            "MDCLASS_INDUTYPE_CD",
-            "LGCLASS_INDTYPE_CD",
-            "LGCLASS_INDUTYPE_CD",
-            "INDTYPE_CD",
-            "INDUTYPE_CD",
-            "CATL_CD",
-            "CATEGORY_CD",
-            "CATG_CD",
-        ],
-        contains=["CD"],
-    )
-    sigun_col = _find_column(source.columns, ["SIGUN_NM"])
-    sign_col = _find_column(source.columns, ["SIGN_CD"])
-    sales_rank_col = _find_column(source.columns, ["SALES_AMT_RKI"])
-    sales_rate_col = _find_column(source.columns, ["SALES_AMT_RATE"])
-    mom_abs_col = _find_column(source.columns, ["BFYM_INCNDECR_VAL"])
-    mom_pct_col = _find_column(source.columns, ["BFYM_INCNDECR_RATE"])
-    yoy_abs_col = _find_column(source.columns, ["FYY_SMYM_INCNDECR_VAL", "BFYY_SMMN_INCNDECR_VAL"])
-    yoy_pct_col = _find_column(source.columns, ["FYY_SMYM_INCNDECR_RATE", "BFYY_SMMN_INCNDECR_RATE"])
-
-    missing = []
-    if not period_col:
-        missing.append("STD_YM or STD_YY")
-    if not sales_col:
-        missing.append("SALES_AMT or CMPT_AMT")
-    if not (name_col or code_col):
-        missing.append("SEX_AGE_CD or AGE_DIV/SEX_DIV")
-    if missing:
-        raise RuntimeError("성연령별 매출 필수 컬럼을 찾지 못했습니다: " + ", ".join(missing))
-
-    resolved_name_col = name_col or code_col or ""
-    age_col = _find_column(source.columns, ["AGE_DIV"])
-    sex_col = _find_column(source.columns, ["SEX_DIV"])
-    payment_count_col = _find_column(source.columns, ["CMPT_NOC"])
-    cancel_count_col = _find_column(source.columns, ["CMPT_RTRCN_NOC"])
-    cancel_amount_col = _find_column(source.columns, ["CMPT_CANCL_AMT"])
-    avg_amount_col = _find_column(source.columns, ["TH1_AVG_CMPT_AMT"])
-
-    label_series = source[resolved_name_col].fillna("").astype(str).str.strip()
-    if age_col or sex_col:
-        age_series = source[age_col].fillna("").astype(str).str.strip() if age_col else ""
-        sex_series = source[sex_col].fillna("").astype(str).str.strip() if sex_col else ""
-        combined = (sex_series + " " + age_series).str.strip() if isinstance(age_series, pd.Series) else label_series
-        label_series = label_series.where(label_series != "", combined)
-
-    out = pd.DataFrame(
-        {
-            "period_key": source[period_col].map(_period_key),
-            "sigun_name": source[sigun_col].fillna("").astype(str).str.strip() if sigun_col else "",
-            "sign_code": source[sign_col].fillna("").astype(str).str.strip() if sign_col else "",
-            "sales_amount": source[sales_col].map(_to_float),
-            "sales_rank": source[sales_rank_col].map(_to_float) if sales_rank_col else np.nan,
-            "sales_rate": source[sales_rate_col].map(_to_float) if sales_rate_col else np.nan,
-            "mom_abs": source[mom_abs_col].map(_to_float) if mom_abs_col else np.nan,
-            "mom_pct": source[mom_pct_col].map(_to_float) if mom_pct_col else np.nan,
-            "yoy_abs": source[yoy_abs_col].map(_to_float) if yoy_abs_col else np.nan,
-            "yoy_pct": source[yoy_pct_col].map(_to_float) if yoy_pct_col else np.nan,
-            "payment_count": source[payment_count_col].map(_to_float) if payment_count_col else np.nan,
-            "cancel_count": source[cancel_count_col].map(_to_float) if cancel_count_col else np.nan,
-            "cancel_amount": source[cancel_amount_col].map(_to_float) if cancel_amount_col else np.nan,
-            "avg_payment_amount": source[avg_amount_col].map(_to_float) if avg_amount_col else np.nan,
-            "segment_name": label_series,
-            "sex_age_code": source["SEX_AGE_CD"].fillna("").astype(str).str.strip() if "SEX_AGE_CD" in source.columns else "",
-        }
-    )
-    out["period_date"] = out["period_key"].map(_period_date_from_key)
-    out = out.dropna(subset=["period_date"])
-    out = out[out["segment_name"] != ""]
-    return out
-
-
 def _fetch_ggdata_page(
     service: str,
     app_key: str,
@@ -412,36 +190,6 @@ def _period_key(value: object) -> str:
     digits = "".join(ch for ch in text if ch.isdigit())
     if len(digits) >= 6:
         return digits[:6]
-    if len(digits) == 4:
-        return digits
-    return ""
-
-
-def _period_date_from_key(value: object) -> pd.Timestamp:
-    key = str(value or "").strip()
-    if len(key) == 4 and key.isdigit():
-        return pd.to_datetime(key + "-01-01", format="%Y-%m-%d", errors="coerce")
-    if len(key) == 6 and key.isdigit():
-        return pd.to_datetime(key + "01", format="%Y%m%d", errors="coerce")
-    return pd.NaT
-
-
-def _normalize_key(value: object) -> str:
-    return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
-
-
-def _find_column(columns: pd.Index | list[str], preferred: list[str], contains: list[str] | None = None) -> str:
-    by_normalized = {_normalize_key(col): str(col) for col in columns}
-    for key in preferred:
-        normalized = _normalize_key(key)
-        if normalized in by_normalized:
-            return by_normalized[normalized]
-    if contains:
-        contains_norm = [_normalize_key(token) for token in contains]
-        for col in columns:
-            normalized_col = _normalize_key(col)
-            if all(token in normalized_col for token in contains_norm):
-                return str(col)
     return ""
 
 
