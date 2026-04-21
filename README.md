@@ -25,7 +25,7 @@ streamlit run app.py
 사용 API:
 
 - `RegionMnyPublctUse`: 지역화폐 발행 및 이용 현황
-- `RegionMnyCard...`: 지역화폐 업종구분별 매출(서비스명 자동탐색, 필요 시 `INDUSTRY_SERVICE`로 고정)
+- `RegionMnyCard...`: 지역화폐 업종구분별 매출
 
 
 ## 화면 구성
