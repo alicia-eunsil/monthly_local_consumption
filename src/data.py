@@ -91,6 +91,10 @@ def fetch_ggdata_industry_sales_records(
                         "LCLASSINDTYPENM",
                         "LGCLSINDTYPENM",
                         "INDTYPENM",
+                        "CATLNM",
+                        "CATEGORYNM",
+                        "CATGNM",
+                        "UPTAENM",
                     }
                 )
                 has_code = any(
@@ -99,6 +103,9 @@ def fetch_ggdata_industry_sales_records(
                         "MDCLASSINDTYPECD",
                         "LGCLASSINDTYPECD",
                         "INDTYPECD",
+                        "CATLCD",
+                        "CATEGORYCD",
+                        "CATGCD",
                     }
                 )
                 if has_period and has_sales and (has_name or has_code):
@@ -110,7 +117,11 @@ def fetch_ggdata_industry_sales_records(
                     missing_tokens.append("SALES_AMT")
                 if not (has_name or has_code):
                     missing_tokens.append("LGCLASS_INDTYPE_NM or MDCLASS_INDTYPE_CD")
-                attempt_logs.append(f"{service}(pSize={size}): 필수 컬럼 누락({', '.join(missing_tokens)})")
+                sample_cols = ", ".join(sorted(columns)[:12])
+                attempt_logs.append(
+                    f"{service}(pSize={size}): 필수 컬럼 누락({', '.join(missing_tokens)})"
+                    + (f" / 응답 컬럼({sample_cols})" if sample_cols else "")
+                )
                 break
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
@@ -227,13 +238,29 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
     sales_col = _find_column(source.columns, ["SALES_AMT"])
     name_col = _find_column(
         source.columns,
-        ["LGCLASS_INDTYPE_NM", "LGLASS_INDTYPE_NM", "LCLASS_INDTYPE_NM", "LGCLS_INDTYPE_NM"],
-        contains=["INDTYPE", "NM"],
+        [
+            "LGCLASS_INDTYPE_NM",
+            "LGLASS_INDTYPE_NM",
+            "LCLASS_INDTYPE_NM",
+            "LGCLS_INDTYPE_NM",
+            "CATL_NM",
+            "CATEGORY_NM",
+            "CATG_NM",
+            "UPTAE_NM",
+        ],
+        contains=["NM"],
     )
     code_col = _find_column(
         source.columns,
-        ["MDCLASS_INDTYPE_CD", "LGCLASS_INDTYPE_CD", "INDTYPE_CD"],
-        contains=["INDTYPE", "CD"],
+        [
+            "MDCLASS_INDTYPE_CD",
+            "LGCLASS_INDTYPE_CD",
+            "INDTYPE_CD",
+            "CATL_CD",
+            "CATEGORY_CD",
+            "CATG_CD",
+        ],
+        contains=["CD"],
     )
 
     missing = []
@@ -247,13 +274,12 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
         raise RuntimeError("업종별 매출 필수 컬럼을 찾지 못했습니다: " + ", ".join(missing))
 
     resolved_name_col = name_col or code_col or ""
+    resolved_code_col = code_col or _find_column(source.columns, ["MDCLASS_INDTYPE_CD", "LGCLASS_INDTYPE_CD"])
     out = pd.DataFrame(
         {
             "period_key": source[period_col].map(_period_key),
             "admong_code": source["ADMONG_CD"].fillna("").astype(str).str.strip() if "ADMONG_CD" in source.columns else "",
-            "mdclass_indtype_code": source["MDCLASS_INDTYPE_CD"].fillna("").astype(str).str.strip()
-            if "MDCLASS_INDTYPE_CD" in source.columns
-            else "",
+            "mdclass_indtype_code": source[resolved_code_col].fillna("").astype(str).str.strip() if resolved_code_col else "",
             "pub_category_code": source["PUB_CATEGORY_CD"].fillna("").astype(str).str.strip()
             if "PUB_CATEGORY_CD" in source.columns
             else "",
