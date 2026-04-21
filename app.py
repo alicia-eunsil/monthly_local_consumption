@@ -63,27 +63,38 @@ def require_access_code() -> None:
     st.stop()
 
 
-def load_data_with_progress(app_key: str, industry_service: str) -> tuple[pd.DataFrame, pd.DataFrame, str, str]:
+def load_operation_with_progress(app_key: str) -> pd.DataFrame:
     status = st.empty()
     progress = st.progress(0)
 
-    def update_operation(_service: str, done: int, total: int) -> None:
+    def update(_service: str, done: int, total: int) -> None:
         safe_total = max(total, 1)
-        percent = min(49, int(50 * done / safe_total))
+        percent = min(99, int(100 * done / safe_total))
         status.info(f"운영 현황 데이터를 불러오는 중... ({done:,}/{safe_total:,} 페이지)")
         progress.progress(percent)
 
+    try:
+        records = fetch_ggdata_publication_use_records(app_key, progress_callback=update)
+        operation = normalize_publication_use_frame(pd.DataFrame(records))
+        progress.progress(100)
+        status.success("운영 현황 로딩 완료")
+        return operation
+    finally:
+        progress.empty()
+        status.empty()
+
+
+def load_industry_with_progress(app_key: str, industry_service: str) -> tuple[pd.DataFrame, str, str]:
+    status = st.empty()
+    progress = st.progress(0)
+
     def update_industry(_service: str, done: int, total: int) -> None:
         safe_total = max(total, 1)
-        percent = 50 + min(49, int(50 * done / safe_total))
+        percent = min(99, int(100 * done / safe_total))
         status.info(f"업종 매출 데이터를 불러오는 중... ({done:,}/{safe_total:,} 페이지)")
         progress.progress(percent)
 
     try:
-        records = fetch_ggdata_publication_use_records(app_key, progress_callback=update_operation)
-        operation = normalize_publication_use_frame(pd.DataFrame(records))
-        service_used = ""
-        industry_error = ""
         try:
             service_used, industry_records = fetch_ggdata_industry_sales_records(
                 app_key,
@@ -91,12 +102,17 @@ def load_data_with_progress(app_key: str, industry_service: str) -> tuple[pd.Dat
                 progress_callback=update_industry,
             )
             industry = normalize_industry_sales_frame(pd.DataFrame(industry_records))
+            industry_error = ""
         except Exception as exc:  # noqa: BLE001
+            service_used = ""
             industry = pd.DataFrame()
             industry_error = str(exc)
         progress.progress(100)
-        status.success("데이터 로딩 완료")
-        return operation, industry, service_used, industry_error
+        if industry.empty:
+            status.warning("업종 매출 로딩 실패")
+        else:
+            status.success("업종 매출 로딩 완료")
+        return industry, service_used, industry_error
     finally:
         progress.empty()
         status.empty()
@@ -406,11 +422,11 @@ with st.sidebar:
         st.success("APP_KEY 설정됨")
         if st.button("데이터 새로고침"):
             st.session_state.pop("_loaded_app_key", None)
-            st.session_state.pop("_loaded_industry_service", None)
             st.session_state.pop("_loaded_operation", None)
             st.session_state.pop("_loaded_industry", None)
             st.session_state.pop("_loaded_industry_service_used", None)
             st.session_state.pop("_industry_error", None)
+            st.session_state.pop("_loaded_industry_service", None)
             st.rerun()
     else:
         st.error("APP_KEY가 필요합니다.")
@@ -418,32 +434,21 @@ with st.sidebar:
 if not app_key:
     st.stop()
 
-if (
-    st.session_state.get("_loaded_app_key") == app_key
-    and st.session_state.get("_loaded_industry_service") == effective_industry_service
-    and "_loaded_operation" in st.session_state
-):
+if st.session_state.get("_loaded_app_key") == app_key and "_loaded_operation" in st.session_state:
     operation = st.session_state["_loaded_operation"]
     industry = st.session_state.get("_loaded_industry", pd.DataFrame())
     industry_service_used = st.session_state.get("_loaded_industry_service_used", "")
     industry_error = st.session_state.get("_industry_error", "")
 else:
     try:
-        operation, industry, industry_service_used, industry_error = load_data_with_progress(
-            app_key, effective_industry_service
-        )
+        operation = load_operation_with_progress(app_key)
         st.session_state["_loaded_app_key"] = app_key
-        st.session_state["_loaded_industry_service"] = effective_industry_service
         st.session_state["_loaded_operation"] = operation
-        st.session_state["_loaded_industry"] = industry
-        st.session_state["_loaded_industry_service_used"] = industry_service_used
-        st.session_state["_industry_error"] = industry_error
+        industry = st.session_state.get("_loaded_industry", pd.DataFrame())
+        industry_service_used = st.session_state.get("_loaded_industry_service_used", "")
+        industry_error = st.session_state.get("_industry_error", "")
     except Exception as exc:  # noqa: BLE001
         operation = pd.DataFrame()
-        industry = pd.DataFrame()
-        industry_service_used = ""
-        industry_error = str(exc)
-        st.session_state["_industry_error"] = industry_error
         st.error(str(exc))
         st.stop()
 
@@ -675,12 +680,33 @@ with tab_trend:
         )
 
 with tab_industry:
+    service_changed = st.session_state.get("_loaded_industry_service") != effective_industry_service
+    if service_changed:
+        st.session_state.pop("_loaded_industry", None)
+        st.session_state.pop("_loaded_industry_service_used", None)
+        st.session_state.pop("_industry_error", None)
+        st.session_state["_loaded_industry_service"] = effective_industry_service
+        industry = pd.DataFrame()
+        industry_service_used = ""
+        industry_error = ""
+
+    load_label = "업종 데이터 다시 불러오기" if not industry.empty else "업종 데이터 불러오기"
+    if st.button(load_label, key="load_industry_button"):
+        loaded_industry, used_service, load_error = load_industry_with_progress(app_key, effective_industry_service)
+        st.session_state["_loaded_industry"] = loaded_industry
+        st.session_state["_loaded_industry_service_used"] = used_service
+        st.session_state["_industry_error"] = load_error
+        st.session_state["_loaded_industry_service"] = effective_industry_service
+        st.rerun()
+
     if industry.empty:
-        st.info("업종별 매출 데이터를 불러오지 못했습니다.")
+        st.info("업종별 매출 데이터는 버튼을 눌렀을 때만 로딩합니다.")
         if industry_error:
             st.caption(industry_error)
-        st.caption("`INDUSTRY_SERVICE` 환경변수에 정확한 서비스명을 넣으면 자동 탐색 없이 바로 연동됩니다.")
+        st.caption("명세서의 요청주소 끝 서비스명을 사이드바에 넣으면 더 정확하게 로딩할 수 있습니다.")
     else:
+        if industry_service_used:
+            st.caption(f"업종 API 서비스명: {industry_service_used}")
         st.caption(f"데이터 기준 최신월: {fmt_period_label(industry['period_key'].max())}")
         industry_period_options = sorted(industry["period_key"].dropna().unique(), reverse=True)
         default_index = 0
