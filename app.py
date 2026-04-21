@@ -343,17 +343,6 @@ def yoy_bar_line(
     return alt.layer(bars, line).resolve_scale(y="independent").properties(title=title, height=330, width="container")
 
 
-def metric_trend_table(
-    frame: pd.DataFrame,
-    value_col: str,
-    yoy_abs_col: str,
-    yoy_pct_col: str,
-    value_label: str,
-    yoy_abs_label: str,
-):
-    return
-
-
 def render_monthly_trend_charts(trend: pd.DataFrame) -> None:
     shared_x_scale = trend_x_scale(trend)
 
@@ -407,81 +396,6 @@ def render_monthly_trend_charts(trend: pd.DataFrame) -> None:
         ),
         use_container_width=True,
     )
-
-
-def sigun_amount_trend_chart(frame: pd.DataFrame):
-    amount_long = frame.melt(
-        id_vars=["period_key", "period_date", "sigun_name"],
-        value_vars=["use_amount_million", "charge_amount_million"],
-        var_name="metric",
-        value_name="amount_million",
-    )
-    amount_long["metric_name"] = amount_long["metric"].map(
-        {
-            "use_amount_million": "사용액",
-            "charge_amount_million": "충전액",
-        }
-    )
-    return (
-        alt.Chart(amount_long, title="선택 시군 사용액·충전액 월별 추이")
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("period_date:T", title="기준월"),
-            y=alt.Y("amount_million:Q", title="금액(백만원)"),
-            color=alt.Color(
-                "metric_name:N",
-                title="구분",
-                scale=alt.Scale(
-                    domain=["사용액", "충전액"],
-                    range=["#0f766e", "#7c3aed"],
-                ),
-            ),
-            tooltip=[
-                alt.Tooltip("period_key:N", title="기준년월"),
-                alt.Tooltip("metric_name:N", title="구분"),
-                alt.Tooltip("amount_million:Q", title="금액(백만원)", format=",.0f"),
-            ],
-        )
-        .properties(height=380)
-    )
-
-
-def sigun_yoy_rank_chart(frame: pd.DataFrame, limit: int = 15):
-    data = frame.head(limit).copy()
-    bars = (
-        alt.Chart(data, title=f"시군별 사용액 전년동월대비 증감률 Top {limit}")
-        .mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3)
-        .encode(
-            x=alt.X("use_amount_million_yoy_pct:Q", title="사용액 증감률(%)"),
-            y=alt.Y(
-                "sigun_name:N",
-                sort="-x",
-                title="",
-                axis=alt.Axis(labelOverlap=False, labelLimit=120),
-            ),
-            color=alt.condition(
-                "datum['use_amount_million_yoy_pct'] >= 0",
-                alt.value("#dc2626"),
-                alt.value("#2563eb"),
-            ),
-            tooltip=[
-                alt.Tooltip("sigun_name:N", title="시군"),
-                alt.Tooltip("use_amount_million:Q", title="월별 사용액(백만원)", format=",.0f"),
-                alt.Tooltip("use_amount_million_yoy_abs:Q", title="사용액 증감액(백만원)", format=",.0f"),
-                alt.Tooltip("use_amount_million_yoy_pct:Q", title="사용액 증감률(%)", format=",.1f"),
-            ],
-        )
-    )
-    labels = (
-        alt.Chart(data)
-        .mark_text(align="left", baseline="middle", dx=4, color="#111827")
-        .encode(
-            x=alt.X("use_amount_million_yoy_pct:Q"),
-            y=alt.Y("sigun_name:N", sort="-x"),
-            text=alt.Text("use_amount_million_yoy_pct:Q", format="+,.1f"),
-        )
-    )
-    return alt.layer(bars, labels).properties(height=max(340, min(720, len(data) * 38)))
 
 
 require_access_code()
@@ -676,93 +590,6 @@ with tab_summary:
     st.markdown("---")
     render_monthly_trend_charts(trend)
 
-if False:
-    shared_x_scale = trend_x_scale(trend)
-
-    st.markdown("#### 사용액")
-    st.altair_chart(
-        trend_line(trend, "use_amount_million", "월별 사용액 추이", "사용액(백만원)", "#0f766e", shared_x_scale),
-        use_container_width=True,
-    )
-    left, right = st.columns([3, 2])
-    with left:
-        st.altair_chart(
-            yoy_bar_line(
-                trend,
-                "use_amount_million_yoy_abs",
-                "use_amount_million_yoy_pct",
-                "전년동월대비 사용액 추이",
-                "증감액(백만원)",
-                None,
-            ),
-            use_container_width=True,
-        )
-    with right:
-        metric_trend_table(
-            trend,
-            "use_amount_million",
-            "use_amount_million_yoy_abs",
-            "use_amount_million_yoy_pct",
-            "월데이터(백만원)",
-            "전년동월대비 증감(백만원)",
-        )
-
-    st.markdown("#### 충전액")
-    st.altair_chart(
-        trend_line(trend, "charge_amount_million", "월별 충전액 추이", "충전액(백만원)", "#7c3aed", shared_x_scale),
-        use_container_width=True,
-    )
-    left, right = st.columns([3, 2])
-    with left:
-        st.altair_chart(
-            yoy_bar_line(
-                trend,
-                "charge_amount_million_yoy_abs",
-                "charge_amount_million_yoy_pct",
-                "전년동월대비 충전액 추이",
-                "증감액(백만원)",
-                None,
-            ),
-            use_container_width=True,
-        )
-    with right:
-        metric_trend_table(
-            trend,
-            "charge_amount_million",
-            "charge_amount_million_yoy_abs",
-            "charge_amount_million_yoy_pct",
-            "월데이터(백만원)",
-            "전년동월대비 증감(백만원)",
-        )
-
-    st.markdown("#### 신규가입자수")
-    st.altair_chart(
-        trend_line(trend, "new_member_count", "월별 신규가입자수 추이", "신규가입자수", "#64748b", shared_x_scale),
-        use_container_width=True,
-    )
-    left, right = st.columns([3, 2])
-    with left:
-        st.altair_chart(
-            yoy_bar_line(
-                trend,
-                "new_member_count_yoy_abs",
-                "new_member_count_yoy_pct",
-                "전년동월대비 신규가입자수 추이",
-                "증감수(명)",
-                None,
-            ),
-            use_container_width=True,
-        )
-    with right:
-        metric_trend_table(
-            trend,
-            "new_member_count",
-            "new_member_count_yoy_abs",
-            "new_member_count_yoy_pct",
-            "월데이터(명)",
-            "전년동월대비 증감(명)",
-        )
-
 with tab_diag:
     metric_map = {
         "사용액": ("use_amount_million", "사용액(백만원)"),
@@ -921,8 +748,6 @@ with tab_diag:
         )
 
 with tab_sigun:
-    st.caption(f"기준년월: {fmt_period_label(selected_period)}")
-
     sigun_rank = (
         current.groupby("sigun_name", as_index=False)[
             ["new_member_count", "charge_amount_million", "use_amount_million"]
