@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import altair as alt
 import pandas as pd
@@ -766,9 +766,21 @@ with tab_diag:
 
     d1, d2 = st.columns([2, 2])
     with d1:
-        diag_metric = st.selectbox("진단 지표", list(metric_map.keys()), index=0, key="diag_metric")
+        diag_metric = st.radio(
+            "진단 지표",
+            list(metric_map.keys()),
+            index=0,
+            key="diag_metric",
+            horizontal=True,
+        )
     with d2:
-        diag_window_name = st.selectbox("분석 기간", list(period_window_map.keys()), index=1, key="diag_window")
+        diag_window_name = st.radio(
+            "분석 기간",
+            list(period_window_map.keys()),
+            index=1,
+            key="diag_window",
+            horizontal=True,
+        )
 
     metric_col, _metric_label = metric_map[diag_metric]
     window_months = period_window_map[diag_window_name]
@@ -853,7 +865,8 @@ with tab_diag:
             use_container_width=True,
         )
 
-    st.markdown("#### 전년동월 대비 개선/악화")
+    st.markdown("#### 전년동월 증감률(단월)")
+    st.caption("설명: 선택한 기준월(보통 최신월)의 값을 작년 같은 달과 비교한 증감률(%)입니다. 단일 월 비교라 일시적 변동의 영향이 있을 수 있습니다.")
     sigun_yoy = add_sigun_yoy_columns(filtered)
     yoy_col = f"{metric_col}_yoy_pct"
     if yoy_col not in sigun_yoy.columns:
