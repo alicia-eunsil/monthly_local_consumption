@@ -511,36 +511,36 @@ use_to_charge_yoy_pct = (
     float(selected_trend["use_to_charge_rate_yoy_pct"].iloc[0]) if not selected_trend.empty else float("nan")
 )
 
-st.caption(f"기준 년월: {fmt_period_label(selected_period)} / 출처: 경기데이터드림")
-kpi_cols = st.columns(4)
-kpi_cols[0].metric(
-    "월별 신규가입자수",
-    "-" if pd.isna(total_new_members) else f"{total_new_members:,.0f}명",
-    delta=fmt_yoy_delta(new_member_yoy_abs, new_member_yoy_pct, is_count=True),
-)
-kpi_cols[1].metric(
-    "월별 충전액",
-    fmt_million_money(total_charge_million),
-    delta=fmt_yoy_delta(charge_yoy_abs, charge_yoy_pct),
-)
-kpi_cols[2].metric(
-    "월별 사용액",
-    fmt_million_money(total_use_million),
-    delta=fmt_yoy_delta(use_yoy_abs, use_yoy_pct),
-)
-kpi_cols[3].metric(
-    "사용액/충전액",
-    "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%",
-    delta=(
-        "전년동월대비 없음"
-        if pd.isna(use_to_charge_yoy_abs) or pd.isna(use_to_charge_yoy_pct)
-        else f"{use_to_charge_yoy_abs:+,.1f}%p / {use_to_charge_yoy_pct:+,.1f}%"
-    ),
-)
-
 tab_summary, tab_diag, tab_sigun = st.tabs(["경기도 현황", "진단", "시군별 현황"])
 
 with tab_summary:
+    st.caption(f"기준 년월: {fmt_period_label(selected_period)} / 출처: 경기데이터드림")
+    kpi_cols = st.columns(4)
+    kpi_cols[0].metric(
+        "월별 신규가입자수",
+        "-" if pd.isna(total_new_members) else f"{total_new_members:,.0f}명",
+        delta=fmt_yoy_delta(new_member_yoy_abs, new_member_yoy_pct, is_count=True),
+    )
+    kpi_cols[1].metric(
+        "월별 충전액",
+        fmt_million_money(total_charge_million),
+        delta=fmt_yoy_delta(charge_yoy_abs, charge_yoy_pct),
+    )
+    kpi_cols[2].metric(
+        "월별 사용액",
+        fmt_million_money(total_use_million),
+        delta=fmt_yoy_delta(use_yoy_abs, use_yoy_pct),
+    )
+    kpi_cols[3].metric(
+        "사용액/충전액",
+        "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%",
+        delta=(
+            "전년동월대비 없음"
+            if pd.isna(use_to_charge_yoy_abs) or pd.isna(use_to_charge_yoy_pct)
+            else f"{use_to_charge_yoy_abs:+,.1f}%p / {use_to_charge_yoy_pct:+,.1f}%"
+        ),
+    )
+
     amount_long = trend.melt(
         id_vars=["period_key", "period_date"],
         value_vars=["charge_amount_million", "use_amount_million"],
@@ -573,30 +573,6 @@ with tab_summary:
     st.altair_chart(amount_chart, use_container_width=True)
 
     st.caption(f"기준: {fmt_period_label(selected_period)}")
-    sigun_rank = (
-        current.groupby("sigun_name", as_index=False)[
-            ["new_member_count", "charge_amount_million", "use_amount_million"]
-        ]
-        .sum()
-        .sort_values("use_amount_million", ascending=False)
-    )
-    left, right = st.columns(2)
-    left.altair_chart(
-        chart_bar(sigun_rank, "use_amount_million", "sigun_name", "시군별 사용액 Top 10", "사용액(백만원)", 10, "#5f9f8f"),
-        use_container_width=True,
-    )
-    right.altair_chart(
-        chart_bar(
-            sigun_rank.sort_values("charge_amount_million", ascending=False),
-            "charge_amount_million",
-            "sigun_name",
-            "시군별 충전액 Top 10",
-            "충전액(백만원)",
-            10,
-            "#8d7ab8",
-        ),
-        use_container_width=True,
-    )
     st.markdown("---")
     render_monthly_trend_charts(trend)
 
