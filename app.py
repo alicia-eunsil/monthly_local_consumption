@@ -413,9 +413,9 @@ with st.sidebar:
     app_key = get_app_key()
     industry_service = get_industry_service()
     industry_service_input = st.text_input(
-        "업종 API 서비스명(선택)",
+        "성연령 API 서비스명(선택)",
         value=industry_service,
-        help="명세서의 요청주소 끝 서비스명만 입력하세요. 예: TB25BPTGGCARDCATLSALEM",
+        help="명세서의 요청주소 끝 서비스명만 입력하세요. 예: TBDASSIGNRMSALESSEXAGES",
     ).strip()
     effective_industry_service = industry_service_input or industry_service
     if app_key:
@@ -534,7 +534,7 @@ kpi_cols[2].metric(
 )
 kpi_cols[3].metric("사용액/충전액", "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%")
 
-tab_summary, tab_trend, tab_industry, tab_sigun = st.tabs(["요약", "월별 추이", "업종별 매출", "시군별 현황"])
+tab_summary, tab_trend, tab_industry, tab_sigun = st.tabs(["요약", "월별 추이", "성연령별 매출", "시군별 현황"])
 
 with tab_summary:
     amount_long = trend.melt(
@@ -690,7 +690,7 @@ with tab_industry:
         industry_service_used = ""
         industry_error = ""
 
-    load_label = "업종 데이터 다시 불러오기" if not industry.empty else "업종 데이터 불러오기"
+    load_label = "성연령 데이터 다시 불러오기" if not industry.empty else "성연령 데이터 불러오기"
     if st.button(load_label, key="load_industry_button"):
         loaded_industry, used_service, load_error = load_industry_with_progress(app_key, effective_industry_service)
         st.session_state["_loaded_industry"] = loaded_industry
@@ -700,13 +700,13 @@ with tab_industry:
         st.rerun()
 
     if industry.empty:
-        st.info("업종별 매출 데이터는 버튼을 눌렀을 때만 로딩합니다.")
+        st.info("성연령별 매출 데이터는 버튼을 눌렀을 때만 로딩합니다.")
         if industry_error:
             st.caption(industry_error)
         st.caption("명세서의 요청주소 끝 서비스명을 사이드바에 넣으면 더 정확하게 로딩할 수 있습니다.")
     else:
         if industry_service_used:
-            st.caption(f"업종 API 서비스명: {industry_service_used}")
+            st.caption(f"성연령 API 서비스명: {industry_service_used}")
         st.caption(f"데이터 기준 최신월: {fmt_period_label(industry['period_key'].max())}")
         industry_period_options = sorted(industry["period_key"].dropna().unique(), reverse=True)
         default_index = 0
@@ -716,7 +716,7 @@ with tab_industry:
         control_left, control_mid, control_right = st.columns([2, 2, 1])
         with control_left:
             selected_industry_period = st.selectbox(
-                "업종 기준년월",
+                "성연령 기준년월",
                 options=industry_period_options,
                 index=default_index,
                 key="industry_period",
@@ -740,7 +740,7 @@ with tab_industry:
 
         current_industry = industry_trend[industry_trend["period_key"] == selected_industry_period].copy()
         if current_industry.empty:
-            st.warning("선택한 기준년월의 업종 데이터가 없습니다.")
+            st.warning("선택한 기준년월의 성연령 데이터가 없습니다.")
         else:
             rank = (
                 current_industry.groupby("lgclass_indtype_name", as_index=False)[
@@ -754,7 +754,7 @@ with tab_industry:
                     rank,
                     "sales_amount",
                     "lgclass_indtype_name",
-                    f"업종별 매출 Top {top_n}",
+                    f"성연령별 매출 Top {top_n}",
                     "매출액",
                     limit=top_n,
                     color="#0f766e",
@@ -766,7 +766,7 @@ with tab_industry:
                 rank.head(top_n)
                 .rename(
                     columns={
-                        "lgclass_indtype_name": "업종명",
+                        "lgclass_indtype_name": "성연령코드",
                         "sales_amount": "매출액",
                         "mom_abs": "전월대비 증감액",
                         "mom_pct": "전월대비 증감률(%)",

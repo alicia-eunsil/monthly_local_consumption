@@ -14,6 +14,7 @@ import pandas as pd
 GGDATA_BASE_URL = "https://openapi.gg.go.kr"
 PUBLICATION_USE_SERVICE = "RegionMnyPublctUse"
 INDUSTRY_SALES_SERVICE_CANDIDATES = [
+    "TBDASSIGNRMSALESSEXAGES",
     "TB25BPTGGCARDCATLSALEM",
 ]
 MAX_PAGE_SIZE = 1000
@@ -99,6 +100,7 @@ def fetch_ggdata_industry_sales_records(
                 has_code = any(
                     key in keys
                     for key in {
+                        "SEXAGECD",
                         "MDCLASSINDTYPECD",
                         "MDCLASSINDUTYPECD",
                         "LGCLASSINDTYPECD",
@@ -259,6 +261,7 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
     code_col = _find_column(
         source.columns,
         [
+            "SEX_AGE_CD",
             "MDCLASS_INDTYPE_CD",
             "MDCLASS_INDUTYPE_CD",
             "LGCLASS_INDTYPE_CD",
@@ -271,7 +274,7 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
         ],
         contains=["CD"],
     )
-    admong_col = _find_column(source.columns, ["ADMONG_CD", "ADMDONG_CD"])
+    admong_col = _find_column(source.columns, ["ADMONG_CD", "ADMDONG_CD", "SIGN_CD"])
     sales_rank_col = _find_column(source.columns, ["SALES_AMT_RKI"])
     sales_rate_col = _find_column(source.columns, ["SALES_AMT_RATE"])
     mom_abs_col = _find_column(source.columns, ["BFYM_INCNDECR_VAL"])
@@ -310,6 +313,7 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
             "yoy_abs": source[yoy_abs_col].map(_to_float) if yoy_abs_col else np.nan,
             "yoy_pct": source[yoy_pct_col].map(_to_float) if yoy_pct_col else np.nan,
             "lgclass_indtype_name": source[resolved_name_col].fillna("").astype(str).str.strip(),
+            "sex_age_code": source["SEX_AGE_CD"].fillna("").astype(str).str.strip() if "SEX_AGE_CD" in source.columns else "",
         }
     )
     out["period_date"] = pd.to_datetime(out["period_key"] + "01", format="%Y%m%d", errors="coerce")
