@@ -631,6 +631,14 @@ with tab_summary:
             x=alt.X("period_date:T", title="기준월"),
             y=alt.Y("amount_million:Q", title="금액(백만원)"),
             color=alt.Color("metric_name:N", title="구분"),
+            lineDash=alt.LineDash(
+                "metric_name:N",
+                scale=alt.Scale(
+                    domain=["충전액", "사용액"],
+                    range=[[6, 4], [1, 0]],
+                ),
+                legend=None,
+            ),
             tooltip=[
                 alt.Tooltip("period_key:N", title="기준년월"),
                 alt.Tooltip("metric_name:N", title="구분"),
@@ -772,53 +780,6 @@ with tab_diag:
         horizontal=True,
     )
     metric_col, _metric_label = metric_map[diag_metric]
-
-    st.markdown("#### 전년동월 증감률(단월)")
-    st.caption(
-        f"기준년월: {fmt_period_label(selected_period)} / 설명: 선택한 기준월(보통 최신월)의 값을 작년 같은 달과 비교한 증감률(%)입니다. 단일 월 비교라 일시적 변동의 영향이 있을 수 있습니다."
-    )
-    sigun_yoy = add_sigun_yoy_columns(filtered)
-    yoy_col = f"{metric_col}_yoy_pct"
-    if yoy_col not in sigun_yoy.columns:
-        st.info("선택한 지표의 전년동월 비교 컬럼이 없습니다.")
-    else:
-        yoy_rows = (
-            sigun_yoy[sigun_yoy["period_key"] == selected_period]
-            .dropna(subset=[yoy_col])
-            .sort_values(yoy_col, ascending=False)
-        )
-        if yoy_rows.empty:
-            st.info("전년동월 대비를 계산할 데이터가 부족합니다.")
-        else:
-            left, right = st.columns(2)
-            left.altair_chart(
-                chart_bar(
-                    yoy_rows,
-                    yoy_col,
-                    "sigun_name",
-                    "개선 Top 5",
-                    "증감률(%)",
-                    limit=5,
-                    color="#5f9f8f",
-                    value_format="+,.1f",
-                ),
-                use_container_width=True,
-            )
-            right.altair_chart(
-                chart_bar(
-                    yoy_rows.sort_values(yoy_col, ascending=True),
-                    yoy_col,
-                    "sigun_name",
-                    "악화 Top 5",
-                    "증감률(%)",
-                    limit=5,
-                    color="#c97b7b",
-                    value_format="+,.1f",
-                ),
-                use_container_width=True,
-            )
-
-    st.markdown("---")
     st.markdown("#### 분석기간 기반 진단")
     diag_window_name = st.radio(
         "분석 기간",
@@ -908,6 +869,52 @@ with tab_diag:
             ),
             use_container_width=True,
         )
+
+    st.markdown("---")
+    st.markdown("#### 전년동월 증감률(단월)")
+    st.caption(
+        f"기준년월: {fmt_period_label(selected_period)} / 설명: 선택한 기준월(보통 최신월)의 값을 작년 같은 달과 비교한 증감률(%)입니다. 단일 월 비교라 일시적 변동의 영향이 있을 수 있습니다."
+    )
+    sigun_yoy = add_sigun_yoy_columns(filtered)
+    yoy_col = f"{metric_col}_yoy_pct"
+    if yoy_col not in sigun_yoy.columns:
+        st.info("선택한 지표의 전년동월 비교 컬럼이 없습니다.")
+    else:
+        yoy_rows = (
+            sigun_yoy[sigun_yoy["period_key"] == selected_period]
+            .dropna(subset=[yoy_col])
+            .sort_values(yoy_col, ascending=False)
+        )
+        if yoy_rows.empty:
+            st.info("전년동월 대비를 계산할 데이터가 부족합니다.")
+        else:
+            left, right = st.columns(2)
+            left.altair_chart(
+                chart_bar(
+                    yoy_rows,
+                    yoy_col,
+                    "sigun_name",
+                    "개선 Top 5",
+                    "증감률(%)",
+                    limit=5,
+                    color="#5f9f8f",
+                    value_format="+,.1f",
+                ),
+                use_container_width=True,
+            )
+            right.altair_chart(
+                chart_bar(
+                    yoy_rows.sort_values(yoy_col, ascending=True),
+                    yoy_col,
+                    "sigun_name",
+                    "악화 Top 5",
+                    "증감률(%)",
+                    limit=5,
+                    color="#c97b7b",
+                    value_format="+,.1f",
+                ),
+                use_container_width=True,
+            )
 
 with tab_sigun:
     st.caption(f"기준년월: {fmt_period_label(selected_period)}")
