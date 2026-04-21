@@ -27,8 +27,9 @@ MAX_WORKERS = 8
 REQUEST_TIMEOUT_SECONDS = 120
 REQUEST_RETRIES = 3
 INDUSTRY_MAX_WORKERS = 3
-INDUSTRY_REQUEST_TIMEOUT_SECONDS = 30
-INDUSTRY_REQUEST_RETRIES = 2
+INDUSTRY_REQUEST_TIMEOUT_SECONDS = 90
+INDUSTRY_REQUEST_RETRIES = 4
+INDUSTRY_PAGE_SIZE_CANDIDATES = [500, 300, 200, 100]
 
 ProgressCallback = Callable[[str, int, int], None]
 
@@ -49,7 +50,7 @@ def fetch_ggdata_publication_use_records(
 def fetch_ggdata_industry_sales_records(
     app_key: str,
     service_override: str = "",
-    page_size: int = MAX_PAGE_SIZE,
+    page_size: int = INDUSTRY_PAGE_SIZE_CANDIDATES[0],
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[str, list[dict]]:
     candidates: list[str] = []
@@ -62,28 +63,40 @@ def fetch_ggdata_industry_sales_records(
     attempt_logs: list[str] = []
     last_error: Exception | None = None
     for service in candidates:
-        try:
-            rows = fetch_ggdata_records(
-                service,
-                app_key,
-                page_size=page_size,
-                progress_callback=progress_callback,
-                max_workers=INDUSTRY_MAX_WORKERS,
-                timeout_seconds=INDUSTRY_REQUEST_TIMEOUT_SECONDS,
-                retries=INDUSTRY_REQUEST_RETRIES,
-            )
-            if not rows:
-                attempt_logs.append(f"{service}: 행 데이터 없음")
-                continue
-            columns = {str(col).strip().upper() for col in rows[0].keys()}
-            if {"STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"}.issubset(columns):
-                return service, rows
-            missing = sorted({"STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"} - columns)
-            attempt_logs.append(f"{service}: 필수 컬럼 누락({', '.join(missing)})")
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            message = str(exc).strip()
-            attempt_logs.append(f"{service}: 호출 실패({message})")
+        sizes = [int(page_size)] + [s for s in INDUSTRY_PAGE_SIZE_CANDIDATES if s != int(page_size)]
+        tried_timeout = False
+        for size in sizes:
+            try:
+                rows = fetch_ggdata_records(
+                    service,
+                    app_key,
+                    page_size=size,
+                    progress_callback=progress_callback,
+                    max_workers=INDUSTRY_MAX_WORKERS,
+                    timeout_seconds=INDUSTRY_REQUEST_TIMEOUT_SECONDS,
+                    retries=INDUSTRY_REQUEST_RETRIES,
+                )
+                if not rows:
+                    attempt_logs.append(f"{service}(pSize={size}): 행 데이터 없음")
+                    break
+                columns = {str(col).strip().upper() for col in rows[0].keys()}
+                if {"STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"}.issubset(columns):
+                    return service, rows
+                missing = sorted({"STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"} - columns)
+                attempt_logs.append(f"{service}(pSize={size}): 필수 컬럼 누락({', '.join(missing)})")
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                message = str(exc).strip()
+                lower_message = message.lower()
+                if "timed out" in lower_message or "read operation timed out" in lower_message:
+                    tried_timeout = True
+                    attempt_logs.append(f"{service}(pSize={size}): 타임아웃")
+                    continue
+                attempt_logs.append(f"{service}(pSize={size}): 호출 실패({message})")
+                break
+        if tried_timeout:
+            attempt_logs.append(f"{service}: pSize 축소 재시도 완료")
 
     hint = ", ".join(candidates)
     details = " | ".join(attempt_logs[:7])
