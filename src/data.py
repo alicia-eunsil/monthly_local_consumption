@@ -14,6 +14,7 @@ import pandas as pd
 GGDATA_BASE_URL = "https://openapi.gg.go.kr"
 PUBLICATION_USE_SERVICE = "RegionMnyPublctUse"
 INDUSTRY_SALES_SERVICE_CANDIDATES = [
+    "TB25BPTGGCARDCATLSALEM",
     "RegionMnyCardLgclsSales",
     "RegionMnyCardLgclsSls",
     "RegionMnyCardLclassSales",

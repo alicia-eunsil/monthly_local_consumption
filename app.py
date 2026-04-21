@@ -396,6 +396,12 @@ with st.sidebar:
     st.subheader("데이터")
     app_key = get_app_key()
     industry_service = get_industry_service()
+    industry_service_input = st.text_input(
+        "업종 API 서비스명(선택)",
+        value=industry_service,
+        help="명세서의 요청주소 끝 서비스명만 입력하세요. 예: RegionMnyCardLgclsSales",
+    ).strip()
+    effective_industry_service = industry_service_input or industry_service
     if app_key:
         st.success("APP_KEY 설정됨")
         if st.button("데이터 새로고침"):
@@ -414,7 +420,7 @@ if not app_key:
 
 if (
     st.session_state.get("_loaded_app_key") == app_key
-    and st.session_state.get("_loaded_industry_service") == industry_service
+    and st.session_state.get("_loaded_industry_service") == effective_industry_service
     and "_loaded_operation" in st.session_state
 ):
     operation = st.session_state["_loaded_operation"]
@@ -423,9 +429,11 @@ if (
     industry_error = st.session_state.get("_industry_error", "")
 else:
     try:
-        operation, industry, industry_service_used, industry_error = load_data_with_progress(app_key, industry_service)
+        operation, industry, industry_service_used, industry_error = load_data_with_progress(
+            app_key, effective_industry_service
+        )
         st.session_state["_loaded_app_key"] = app_key
-        st.session_state["_loaded_industry_service"] = industry_service
+        st.session_state["_loaded_industry_service"] = effective_industry_service
         st.session_state["_loaded_operation"] = operation
         st.session_state["_loaded_industry"] = industry
         st.session_state["_loaded_industry_service_used"] = industry_service_used
