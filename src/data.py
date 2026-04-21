@@ -87,10 +87,15 @@ def fetch_ggdata_industry_sales_records(
                     key in keys
                     for key in {
                         "LGCLASSINDTYPENM",
+                        "LGCLASSINDUTYPENM",
                         "LGLASSINDTYPENM",
+                        "LGLASSINDUTYPENM",
                         "LCLASSINDTYPENM",
+                        "LCLASSINDUTYPENM",
                         "LGCLSINDTYPENM",
+                        "LGCLSINDUTYPENM",
                         "INDTYPENM",
+                        "INDUTYPENM",
                         "CATLNM",
                         "CATEGORYNM",
                         "CATGNM",
@@ -101,8 +106,11 @@ def fetch_ggdata_industry_sales_records(
                     key in keys
                     for key in {
                         "MDCLASSINDTYPECD",
+                        "MDCLASSINDUTYPECD",
                         "LGCLASSINDTYPECD",
+                        "LGCLASSINDUTYPECD",
                         "INDTYPECD",
+                        "INDUTYPECD",
                         "CATLCD",
                         "CATEGORYCD",
                         "CATGCD",
@@ -240,9 +248,13 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
         source.columns,
         [
             "LGCLASS_INDTYPE_NM",
+            "LGCLASS_INDUTYPE_NM",
             "LGLASS_INDTYPE_NM",
+            "LGLASS_INDUTYPE_NM",
             "LCLASS_INDTYPE_NM",
+            "LCLASS_INDUTYPE_NM",
             "LGCLS_INDTYPE_NM",
+            "LGCLS_INDUTYPE_NM",
             "CATL_NM",
             "CATEGORY_NM",
             "CATG_NM",
@@ -254,14 +266,24 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
         source.columns,
         [
             "MDCLASS_INDTYPE_CD",
+            "MDCLASS_INDUTYPE_CD",
             "LGCLASS_INDTYPE_CD",
+            "LGCLASS_INDUTYPE_CD",
             "INDTYPE_CD",
+            "INDUTYPE_CD",
             "CATL_CD",
             "CATEGORY_CD",
             "CATG_CD",
         ],
         contains=["CD"],
     )
+    admong_col = _find_column(source.columns, ["ADMONG_CD", "ADMDONG_CD"])
+    sales_rank_col = _find_column(source.columns, ["SALES_AMT_RKI"])
+    sales_rate_col = _find_column(source.columns, ["SALES_AMT_RATE"])
+    mom_abs_col = _find_column(source.columns, ["BFYM_INCNDECR_VAL"])
+    mom_pct_col = _find_column(source.columns, ["BFYM_INCNDECR_RATE"])
+    yoy_abs_col = _find_column(source.columns, ["FYY_SMYM_INCNDECR_VAL", "BFYY_SMMN_INCNDECR_VAL"])
+    yoy_pct_col = _find_column(source.columns, ["FYY_SMYM_INCNDECR_RATE", "BFYY_SMMN_INCNDECR_RATE"])
 
     missing = []
     if not period_col:
@@ -274,26 +296,25 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
         raise RuntimeError("업종별 매출 필수 컬럼을 찾지 못했습니다: " + ", ".join(missing))
 
     resolved_name_col = name_col or code_col or ""
-    resolved_code_col = code_col or _find_column(source.columns, ["MDCLASS_INDTYPE_CD", "LGCLASS_INDTYPE_CD"])
+    resolved_code_col = code_col or _find_column(
+        source.columns,
+        ["MDCLASS_INDTYPE_CD", "MDCLASS_INDUTYPE_CD", "LGCLASS_INDTYPE_CD", "LGCLASS_INDUTYPE_CD"],
+    )
     out = pd.DataFrame(
         {
             "period_key": source[period_col].map(_period_key),
-            "admong_code": source["ADMONG_CD"].fillna("").astype(str).str.strip() if "ADMONG_CD" in source.columns else "",
+            "admong_code": source[admong_col].fillna("").astype(str).str.strip() if admong_col else "",
             "mdclass_indtype_code": source[resolved_code_col].fillna("").astype(str).str.strip() if resolved_code_col else "",
             "pub_category_code": source["PUB_CATEGORY_CD"].fillna("").astype(str).str.strip()
             if "PUB_CATEGORY_CD" in source.columns
             else "",
             "sales_amount": source[sales_col].map(_to_float),
-            "sales_rank": source["SALES_AMT_RKI"].map(_to_float) if "SALES_AMT_RKI" in source.columns else np.nan,
-            "sales_rate": source["SALES_AMT_RATE"].map(_to_float) if "SALES_AMT_RATE" in source.columns else np.nan,
-            "mom_abs": source["BFYM_INCNDECR_VAL"].map(_to_float) if "BFYM_INCNDECR_VAL" in source.columns else np.nan,
-            "mom_pct": source["BFYM_INCNDECR_RATE"].map(_to_float) if "BFYM_INCNDECR_RATE" in source.columns else np.nan,
-            "yoy_abs": source["FYY_SMYM_INCNDECR_VAL"].map(_to_float)
-            if "FYY_SMYM_INCNDECR_VAL" in source.columns
-            else np.nan,
-            "yoy_pct": source["FYY_SMYM_INCNDECR_RATE"].map(_to_float)
-            if "FYY_SMYM_INCNDECR_RATE" in source.columns
-            else np.nan,
+            "sales_rank": source[sales_rank_col].map(_to_float) if sales_rank_col else np.nan,
+            "sales_rate": source[sales_rate_col].map(_to_float) if sales_rate_col else np.nan,
+            "mom_abs": source[mom_abs_col].map(_to_float) if mom_abs_col else np.nan,
+            "mom_pct": source[mom_pct_col].map(_to_float) if mom_pct_col else np.nan,
+            "yoy_abs": source[yoy_abs_col].map(_to_float) if yoy_abs_col else np.nan,
+            "yoy_pct": source[yoy_pct_col].map(_to_float) if yoy_pct_col else np.nan,
             "lgclass_indtype_name": source[resolved_name_col].fillna("").astype(str).str.strip(),
         }
     )
