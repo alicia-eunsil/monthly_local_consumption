@@ -609,7 +609,7 @@ kpi_cols[3].metric(
     ),
 )
 
-tab_summary, tab_trend, tab_diag, tab_sigun = st.tabs(["경기도 현황", "월별 추이", "진단", "시군별 현황"])
+tab_summary, tab_diag, tab_sigun = st.tabs(["경기도 현황", "진단", "시군별 현황"])
 
 with tab_summary:
     amount_long = trend.melt(
@@ -669,7 +669,7 @@ with tab_summary:
     st.markdown("---")
     render_monthly_trend_charts(trend)
 
-with tab_trend:
+if False:
     shared_x_scale = trend_x_scale(trend)
 
     st.markdown("#### 사용액")
