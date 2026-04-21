@@ -624,28 +624,22 @@ with tab_summary:
             "use_amount_million": "사용액",
         }
     )
+    amount_base = alt.Chart(amount_long).encode(
+        x=alt.X("period_date:T", title="기준월"),
+        y=alt.Y("amount_million:Q", title="금액(백만원)"),
+        color=alt.Color("metric_name:N", title="구분"),
+        tooltip=[
+            alt.Tooltip("period_key:N", title="기준년월"),
+            alt.Tooltip("metric_name:N", title="구분"),
+            alt.Tooltip("amount_million:Q", title="금액(백만원)", format=",.0f"),
+        ],
+    )
     amount_chart = (
-        alt.Chart(amount_long, title="월별 충전액·사용액 추이")
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("period_date:T", title="기준월"),
-            y=alt.Y("amount_million:Q", title="금액(백만원)"),
-            color=alt.Color("metric_name:N", title="구분"),
-            lineDash=alt.LineDash(
-                "metric_name:N",
-                scale=alt.Scale(
-                    domain=["충전액", "사용액"],
-                    range=[[6, 4], [1, 0]],
-                ),
-                legend=None,
-            ),
-            tooltip=[
-                alt.Tooltip("period_key:N", title="기준년월"),
-                alt.Tooltip("metric_name:N", title="구분"),
-                alt.Tooltip("amount_million:Q", title="금액(백만원)", format=",.0f"),
-            ],
+        alt.layer(
+            amount_base.transform_filter(alt.datum.metric_name == "사용액").mark_line(point=True),
+            amount_base.transform_filter(alt.datum.metric_name == "충전액").mark_line(point=True, strokeDash=[6, 4]),
         )
-        .properties(height=340)
+        .properties(title="월별 충전액·사용액 추이", height=340)
     )
     st.altair_chart(amount_chart, use_container_width=True)
 
