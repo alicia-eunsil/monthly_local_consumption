@@ -428,11 +428,16 @@ def sigun_amount_trend_chart(frame: pd.DataFrame):
         .encode(
             x=alt.X("period_date:T", title="기준월"),
             y=alt.Y("amount_million:Q", title="금액(백만원)"),
-            color=alt.Color("sigun_name:N", title="시군"),
-            strokeDash=alt.StrokeDash("metric_name:N", title="구분"),
+            color=alt.Color(
+                "metric_name:N",
+                title="구분",
+                scale=alt.Scale(
+                    domain=["사용액", "충전액"],
+                    range=["#0f766e", "#7c3aed"],
+                ),
+            ),
             tooltip=[
                 alt.Tooltip("period_key:N", title="기준년월"),
-                alt.Tooltip("sigun_name:N", title="시군"),
                 alt.Tooltip("metric_name:N", title="구분"),
                 alt.Tooltip("amount_million:Q", title="금액(백만원)", format=",.0f"),
             ],
@@ -883,7 +888,6 @@ with tab_diag:
         selected_period,
         window_months,
     )
-    st.caption(f"기준년월: {fmt_period_label(selected_period)} / 분석기간: {diag_window_name}")
     volatility = compute_volatility_rank(diag_base, metric_col)
     if volatility.empty:
         st.info("변동성을 계산할 데이터가 부족합니다.")
@@ -944,17 +948,8 @@ with tab_sigun:
         use_container_width=True,
     )
 
-    display = sigun_rank.rename(
-        columns={
-            "sigun_name": "시군명",
-            "new_member_count": "월별 신규가입자수",
-            "charge_amount_million": "월별 충전액(백만원)",
-            "use_amount_million": "월별 사용액(백만원)",
-        }
-    )
-    st.dataframe(display, use_container_width=True, hide_index=True)
-
-    st.markdown("#### 선택 시군 월별 추이")
+    st.markdown("---")
+    st.markdown("#### 시군별 월별 추이")
     trend_sigun_options = sorted([x for x in operation["sigun_name"].dropna().unique() if x])
     default_trend_sigun = selected_siguns[0] if selected_siguns else sigun_rank["sigun_name"].iloc[0]
     default_trend_index = (
@@ -971,44 +966,45 @@ with tab_sigun:
         st.info("월별 추이를 볼 시군을 선택해 주세요.")
     else:
         st.altair_chart(sigun_amount_trend_chart(sigun_trend), use_container_width=True)
-
-    st.markdown("#### 시군별 사용액 전년동월대비 증감률 순위")
-    sigun_yoy = add_sigun_yoy_columns(operation)
-    selected_period_yoy = (
-        sigun_yoy[sigun_yoy["period_key"] == selected_period]
-        .dropna(subset=["use_amount_million_yoy_pct"])
-        .sort_values("use_amount_million_yoy_pct", ascending=False)
-    )
-    if selected_period_yoy.empty:
-        st.info("시군별 전년동월대비 순위를 계산하려면 최소 13개월 이상의 데이터가 필요합니다.")
-    else:
-        st.altair_chart(sigun_yoy_rank_chart(selected_period_yoy), use_container_width=True)
-        display_yoy_rank = selected_period_yoy[
+        sigun_trend_yoy = add_yoy_columns(sigun_trend.sort_values("period_date").copy())
+        yoy_ready = sigun_trend_yoy[
             [
-                "sigun_name",
-                "use_amount_million",
                 "use_amount_million_yoy_abs",
-                "use_amount_million_yoy_pct",
-                "charge_amount_million",
+                "charge_amount_million_yoy_abs",
+                "new_member_count_yoy_abs",
             ]
-        ].rename(
-            columns={
-                "sigun_name": "시군명",
-                "use_amount_million": "월별 사용액(백만원)",
-                "use_amount_million_yoy_abs": "사용액 증감액(백만원)",
-                "use_amount_million_yoy_pct": "사용액 증감률(%)",
-                "charge_amount_million": "월별 충전액(백만원)",
-            }
-        )
-        st.dataframe(
-            display_yoy_rank.style.format(
-                {
-                    "월별 사용액(백만원)": "{:,.0f}",
-                    "사용액 증감액(백만원)": "{:,.0f}",
-                    "사용액 증감률(%)": "{:+,.1f}",
-                    "월별 충전액(백만원)": "{:,.0f}",
-                }
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+        ].dropna(how="all")
+        st.markdown("#### 시군별 전년동월대비 증감 추이")
+        if yoy_ready.empty:
+            st.info("전년동월대비 추이를 보려면 최소 13개월 이상의 데이터가 필요합니다.")
+        else:
+            st.altair_chart(
+                yoy_bar_line(
+                    sigun_trend_yoy,
+                    "use_amount_million_yoy_abs",
+                    "use_amount_million_yoy_pct",
+                    "전년동월대비 사용액 추이",
+                    "증감액(백만원)",
+                ),
+                use_container_width=True,
+            )
+            st.altair_chart(
+                yoy_bar_line(
+                    sigun_trend_yoy,
+                    "charge_amount_million_yoy_abs",
+                    "charge_amount_million_yoy_pct",
+                    "전년동월대비 충전액 추이",
+                    "증감액(백만원)",
+                ),
+                use_container_width=True,
+            )
+            st.altair_chart(
+                yoy_bar_line(
+                    sigun_trend_yoy,
+                    "new_member_count_yoy_abs",
+                    "new_member_count_yoy_pct",
+                    "전년동월대비 신규가입자 추이",
+                    "증감수(명)",
+                ),
+                use_container_width=True,
+            )
