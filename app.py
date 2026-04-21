@@ -4,8 +4,13 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from src.data import fetch_ggdata_publication_use_records, normalize_publication_use_frame
-from src.settings import get_access_code, get_app_key
+from src.data import (
+    fetch_ggdata_industry_sales_records,
+    fetch_ggdata_publication_use_records,
+    normalize_industry_sales_frame,
+    normalize_publication_use_frame,
+)
+from src.settings import get_access_code, get_app_key, get_industry_service
 
 
 st.set_page_config(
@@ -58,22 +63,40 @@ def require_access_code() -> None:
     st.stop()
 
 
-def load_operation_with_progress(app_key: str) -> pd.DataFrame:
+def load_data_with_progress(app_key: str, industry_service: str) -> tuple[pd.DataFrame, pd.DataFrame, str, str]:
     status = st.empty()
     progress = st.progress(0)
 
-    def update(_service: str, done: int, total: int) -> None:
+    def update_operation(_service: str, done: int, total: int) -> None:
         safe_total = max(total, 1)
-        percent = min(99, int(100 * done / safe_total))
+        percent = min(49, int(50 * done / safe_total))
         status.info(f"운영 현황 데이터를 불러오는 중... ({done:,}/{safe_total:,} 페이지)")
         progress.progress(percent)
 
+    def update_industry(_service: str, done: int, total: int) -> None:
+        safe_total = max(total, 1)
+        percent = 50 + min(49, int(50 * done / safe_total))
+        status.info(f"업종 매출 데이터를 불러오는 중... ({done:,}/{safe_total:,} 페이지)")
+        progress.progress(percent)
+
     try:
-        records = fetch_ggdata_publication_use_records(app_key, progress_callback=update)
+        records = fetch_ggdata_publication_use_records(app_key, progress_callback=update_operation)
         operation = normalize_publication_use_frame(pd.DataFrame(records))
+        service_used = ""
+        industry_error = ""
+        try:
+            service_used, industry_records = fetch_ggdata_industry_sales_records(
+                app_key,
+                service_override=industry_service,
+                progress_callback=update_industry,
+            )
+            industry = normalize_industry_sales_frame(pd.DataFrame(industry_records))
+        except Exception as exc:  # noqa: BLE001
+            industry = pd.DataFrame()
+            industry_error = str(exc)
         progress.progress(100)
         status.success("데이터 로딩 완료")
-        return operation
+        return operation, industry, service_used, industry_error
     finally:
         progress.empty()
         status.empty()
@@ -192,6 +215,21 @@ def add_yoy_columns(frame: pd.DataFrame) -> pd.DataFrame:
         out[f"{col}_yoy_abs"] = out[col] - prev
         out[f"{col}_yoy_pct"] = out[f"{col}_yoy_abs"] / prev.where(prev != 0) * 100
     return out
+
+
+def add_industry_change_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.sort_values("period_date").copy()
+    parts = []
+    for _, group in out.groupby("lgclass_indtype_name", dropna=False):
+        g = group.sort_values("period_date").copy()
+        prev_m = g["sales_amount"].shift(1)
+        prev_y = g["sales_amount"].shift(12)
+        g["mom_abs"] = g["sales_amount"] - prev_m
+        g["mom_pct"] = g["mom_abs"] / prev_m.where(prev_m != 0) * 100
+        g["yoy_abs"] = g["sales_amount"] - prev_y
+        g["yoy_pct"] = g["yoy_abs"] / prev_y.where(prev_y != 0) * 100
+        parts.append(g)
+    return pd.concat(parts, ignore_index=True) if parts else out
 
 
 def add_sigun_yoy_columns(frame: pd.DataFrame) -> pd.DataFrame:
@@ -357,11 +395,16 @@ st.caption("최신 월별 신규가입자수, 충전액, 사용액을 시군 단
 with st.sidebar:
     st.subheader("데이터")
     app_key = get_app_key()
+    industry_service = get_industry_service()
     if app_key:
         st.success("APP_KEY 설정됨")
         if st.button("데이터 새로고침"):
             st.session_state.pop("_loaded_app_key", None)
+            st.session_state.pop("_loaded_industry_service", None)
             st.session_state.pop("_loaded_operation", None)
+            st.session_state.pop("_loaded_industry", None)
+            st.session_state.pop("_loaded_industry_service_used", None)
+            st.session_state.pop("_industry_error", None)
             st.rerun()
     else:
         st.error("APP_KEY가 필요합니다.")
@@ -369,14 +412,30 @@ with st.sidebar:
 if not app_key:
     st.stop()
 
-if st.session_state.get("_loaded_app_key") == app_key and "_loaded_operation" in st.session_state:
+if (
+    st.session_state.get("_loaded_app_key") == app_key
+    and st.session_state.get("_loaded_industry_service") == industry_service
+    and "_loaded_operation" in st.session_state
+):
     operation = st.session_state["_loaded_operation"]
+    industry = st.session_state.get("_loaded_industry", pd.DataFrame())
+    industry_service_used = st.session_state.get("_loaded_industry_service_used", "")
+    industry_error = st.session_state.get("_industry_error", "")
 else:
     try:
-        operation = load_operation_with_progress(app_key)
+        operation, industry, industry_service_used, industry_error = load_data_with_progress(app_key, industry_service)
         st.session_state["_loaded_app_key"] = app_key
+        st.session_state["_loaded_industry_service"] = industry_service
         st.session_state["_loaded_operation"] = operation
+        st.session_state["_loaded_industry"] = industry
+        st.session_state["_loaded_industry_service_used"] = industry_service_used
+        st.session_state["_industry_error"] = industry_error
     except Exception as exc:  # noqa: BLE001
+        operation = pd.DataFrame()
+        industry = pd.DataFrame()
+        industry_service_used = ""
+        industry_error = str(exc)
+        st.session_state["_industry_error"] = industry_error
         st.error(str(exc))
         st.stop()
 
@@ -386,6 +445,8 @@ if operation.empty:
 
 with st.sidebar:
     st.caption("소스: 경기데이터드림 Open API 지역화폐 발행 및 이용 현황")
+    if industry_service_used:
+        st.caption(f"업종 API: {industry_service_used}")
     period_options = sorted(operation["period_key"].dropna().unique(), reverse=True)
     selected_period = st.selectbox("기준년월", period_options)
 
@@ -460,7 +521,7 @@ kpi_cols[2].metric(
 )
 kpi_cols[3].metric("사용액/충전액", "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%")
 
-tab_summary, tab_trend, tab_sigun = st.tabs(["요약", "월별 추이", "시군별 현황"])
+tab_summary, tab_trend, tab_industry, tab_sigun = st.tabs(["요약", "월별 추이", "업종별 매출", "시군별 현황"])
 
 with tab_summary:
     amount_long = trend.melt(
@@ -604,6 +665,94 @@ with tab_trend:
             "월데이터(명)",
             "전년동월대비 증감(명)",
         )
+
+with tab_industry:
+    if industry.empty:
+        st.info("업종별 매출 데이터를 불러오지 못했습니다.")
+        if industry_error:
+            st.caption(industry_error)
+        st.caption("`INDUSTRY_SERVICE` 환경변수에 정확한 서비스명을 넣으면 자동 탐색 없이 바로 연동됩니다.")
+    else:
+        st.caption(f"데이터 기준 최신월: {fmt_period_label(industry['period_key'].max())}")
+        industry_period_options = sorted(industry["period_key"].dropna().unique(), reverse=True)
+        default_index = 0
+        if selected_period in industry_period_options:
+            default_index = industry_period_options.index(selected_period)
+
+        control_left, control_mid, control_right = st.columns([2, 2, 1])
+        with control_left:
+            selected_industry_period = st.selectbox(
+                "업종 기준년월",
+                options=industry_period_options,
+                index=default_index,
+                key="industry_period",
+            )
+        with control_mid:
+            pub_options = ["전체"] + sorted([x for x in industry["pub_category_code"].dropna().unique() if x])
+            selected_pub = st.selectbox("발행구분", options=pub_options, index=0, key="industry_pub")
+        with control_right:
+            top_n = int(st.number_input("Top N", min_value=5, max_value=30, value=10, step=1))
+
+        industry_base = industry.copy()
+        if selected_pub != "전체":
+            industry_base = industry_base[industry_base["pub_category_code"] == selected_pub]
+
+        industry_trend = (
+            industry_base.groupby(["period_key", "period_date", "lgclass_indtype_name"], as_index=False)["sales_amount"]
+            .sum()
+            .sort_values("period_date")
+        )
+        industry_trend = add_industry_change_columns(industry_trend)
+
+        current_industry = industry_trend[industry_trend["period_key"] == selected_industry_period].copy()
+        if current_industry.empty:
+            st.warning("선택한 기준년월의 업종 데이터가 없습니다.")
+        else:
+            rank = (
+                current_industry.groupby("lgclass_indtype_name", as_index=False)[
+                    ["sales_amount", "mom_abs", "mom_pct", "yoy_abs", "yoy_pct"]
+                ]
+                .sum(numeric_only=True)
+                .sort_values("sales_amount", ascending=False)
+            )
+            st.altair_chart(
+                chart_bar(
+                    rank,
+                    "sales_amount",
+                    "lgclass_indtype_name",
+                    f"업종별 매출 Top {top_n}",
+                    "매출액",
+                    limit=top_n,
+                    color="#0f766e",
+                ),
+                use_container_width=True,
+            )
+
+            st.dataframe(
+                rank.head(top_n)
+                .rename(
+                    columns={
+                        "lgclass_indtype_name": "업종명",
+                        "sales_amount": "매출액",
+                        "mom_abs": "전월대비 증감액",
+                        "mom_pct": "전월대비 증감률(%)",
+                        "yoy_abs": "전년동월대비 증감액",
+                        "yoy_pct": "전년동월대비 증감률(%)",
+                    }
+                )
+                .style.format(
+                    {
+                        "매출액": "{:,.0f}",
+                        "전월대비 증감액": "{:,.0f}",
+                        "전월대비 증감률(%)": "{:+,.1f}",
+                        "전년동월대비 증감액": "{:,.0f}",
+                        "전년동월대비 증감률(%)": "{:+,.1f}",
+                    },
+                    na_rep="-",
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 with tab_sigun:
     st.caption(f"기준년월: {fmt_period_label(selected_period)}")

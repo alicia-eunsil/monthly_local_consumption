@@ -19,3 +19,11 @@ def get_access_code() -> str:
     except Exception:  # noqa: BLE001
         secret_value = ""
     return str(secret_value or os.getenv("ACCESS_CODE", "") or os.getenv("access_code", "")).strip()
+
+
+def get_industry_service() -> str:
+    try:
+        secret_value = st.secrets.get("INDUSTRY_SERVICE", "") or st.secrets.get("industry_service", "")
+    except Exception:  # noqa: BLE001
+        secret_value = ""
+    return str(secret_value or os.getenv("INDUSTRY_SERVICE", "") or os.getenv("industry_service", "")).strip()

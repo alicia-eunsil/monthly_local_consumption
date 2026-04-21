@@ -13,6 +13,14 @@ import pandas as pd
 
 GGDATA_BASE_URL = "https://openapi.gg.go.kr"
 PUBLICATION_USE_SERVICE = "RegionMnyPublctUse"
+INDUSTRY_SALES_SERVICE_CANDIDATES = [
+    "RegionMnyCardLgclsSales",
+    "RegionMnyCardLgclsSls",
+    "RegionMnyCardLclassSales",
+    "RegionMnyCardLgclassSales",
+    "RegionMnyCardIndutyLgclsSales",
+    "RegionMnyCardIndutyLgclsSls",
+]
 MAX_PAGE_SIZE = 1000
 MAX_WORKERS = 8
 REQUEST_TIMEOUT_SECONDS = 120
@@ -32,6 +40,43 @@ def fetch_ggdata_publication_use_records(
         page_size=page_size,
         progress_callback=progress_callback,
     )
+
+
+def fetch_ggdata_industry_sales_records(
+    app_key: str,
+    service_override: str = "",
+    page_size: int = MAX_PAGE_SIZE,
+    progress_callback: ProgressCallback | None = None,
+) -> tuple[str, list[dict]]:
+    candidates: list[str] = []
+    if service_override and service_override.strip():
+        candidates.append(service_override.strip())
+    for service in INDUSTRY_SALES_SERVICE_CANDIDATES:
+        if service not in candidates:
+            candidates.append(service)
+
+    last_error: Exception | None = None
+    for service in candidates:
+        try:
+            rows = fetch_ggdata_records(
+                service,
+                app_key,
+                page_size=page_size,
+                progress_callback=progress_callback,
+            )
+            if not rows:
+                continue
+            columns = {str(col).strip().upper() for col in rows[0].keys()}
+            if {"STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"}.issubset(columns):
+                return service, rows
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+
+    hint = ", ".join(candidates)
+    raise RuntimeError(
+        "업종별 매출 API를 찾지 못했습니다. "
+        f"INDUSTRY_SERVICE 값을 설정하거나 후보 서비스명을 확인해 주세요. ({hint})"
+    ) from last_error
 
 
 def fetch_ggdata_records(
@@ -98,6 +143,44 @@ def normalize_publication_use_frame(df: pd.DataFrame) -> pd.DataFrame:
     )
     out["period_date"] = pd.to_datetime(out["period_key"] + "01", format="%Y%m%d", errors="coerce")
     out = out.dropna(subset=["period_date"])
+    return out
+
+
+def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
+    source = df.copy()
+    source.columns = [str(col).strip() for col in source.columns]
+    required = ["STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"]
+    missing = [col for col in required if col not in source.columns]
+    if missing:
+        raise RuntimeError("업종별 매출 필수 컬럼을 찾지 못했습니다: " + ", ".join(missing))
+
+    out = pd.DataFrame(
+        {
+            "period_key": source["STD_YM"].map(_period_key),
+            "admong_code": source["ADMONG_CD"].fillna("").astype(str).str.strip() if "ADMONG_CD" in source.columns else "",
+            "mdclass_indtype_code": source["MDCLASS_INDTYPE_CD"].fillna("").astype(str).str.strip()
+            if "MDCLASS_INDTYPE_CD" in source.columns
+            else "",
+            "pub_category_code": source["PUB_CATEGORY_CD"].fillna("").astype(str).str.strip()
+            if "PUB_CATEGORY_CD" in source.columns
+            else "",
+            "sales_amount": source["SALES_AMT"].map(_to_float),
+            "sales_rank": source["SALES_AMT_RKI"].map(_to_float) if "SALES_AMT_RKI" in source.columns else np.nan,
+            "sales_rate": source["SALES_AMT_RATE"].map(_to_float) if "SALES_AMT_RATE" in source.columns else np.nan,
+            "mom_abs": source["BFYM_INCNDECR_VAL"].map(_to_float) if "BFYM_INCNDECR_VAL" in source.columns else np.nan,
+            "mom_pct": source["BFYM_INCNDECR_RATE"].map(_to_float) if "BFYM_INCNDECR_RATE" in source.columns else np.nan,
+            "yoy_abs": source["FYY_SMYM_INCNDECR_VAL"].map(_to_float)
+            if "FYY_SMYM_INCNDECR_VAL" in source.columns
+            else np.nan,
+            "yoy_pct": source["FYY_SMYM_INCNDECR_RATE"].map(_to_float)
+            if "FYY_SMYM_INCNDECR_RATE" in source.columns
+            else np.nan,
+            "lgclass_indtype_name": source["LGCLASS_INDTYPE_NM"].fillna("").astype(str).str.strip(),
+        }
+    )
+    out["period_date"] = pd.to_datetime(out["period_key"] + "01", format="%Y%m%d", errors="coerce")
+    out = out.dropna(subset=["period_date"])
+    out = out[out["lgclass_indtype_name"] != ""]
     return out
 
 
