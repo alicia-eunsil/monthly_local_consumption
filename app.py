@@ -129,6 +129,14 @@ def fmt_delta_count(value: float) -> str:
     return f"{sign}{value:,.0f}명"
 
 
+def fmt_yoy_delta(abs_value: float, pct_value: float, is_count: bool = False) -> str:
+    if pd.isna(abs_value) or pd.isna(pct_value):
+        return "전년동월대비 없음"
+    if is_count:
+        return f"{fmt_delta_count(abs_value)} / {fmt_pct(pct_value)}"
+    return f"{fmt_delta_million(abs_value)} / {fmt_pct(pct_value)}"
+
+
 def chart_bar(
     frame: pd.DataFrame,
     x_col: str,
@@ -138,13 +146,20 @@ def chart_bar(
     limit: int = 15,
     color: str = "#2563eb",
     value_format: str = ",.0f",
+    x_axis_format: str | None = None,
+    x_tick_min_step: float | None = None,
 ):
     data = frame.head(limit).copy()
     bars = (
         alt.Chart(data, title=title)
         .mark_bar(color=color, cornerRadiusTopRight=3, cornerRadiusBottomRight=3)
         .encode(
-            x=alt.X(f"{x_col}:Q", title=x_title),
+            x=alt.X(
+                f"{x_col}:Q",
+                title=x_title,
+                axis=alt.Axis(format=x_axis_format) if x_axis_format else alt.Axis(),
+                scale=alt.Scale(tickMinStep=x_tick_min_step) if x_tick_min_step is not None else alt.Undefined,
+            ),
             y=alt.Y(
                 f"{y_col}:N",
                 sort="-x",
@@ -333,30 +348,7 @@ def metric_trend_table(
     value_label: str,
     yoy_abs_label: str,
 ):
-    display = (
-        frame[["period_key", value_col, yoy_abs_col, yoy_pct_col]]
-        .sort_values("period_key", ascending=False)
-        .rename(
-            columns={
-                "period_key": "기준년월",
-                value_col: value_label,
-                yoy_abs_col: yoy_abs_label,
-                yoy_pct_col: "증감률(%)",
-            }
-        )
-    )
-    st.dataframe(
-        display.style.format(
-            {
-                value_label: "{:,.0f}",
-                yoy_abs_label: "{:,.0f}",
-                "증감률(%)": "{:+,.1f}",
-            },
-            na_rep="-",
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
+    return
 
 
 def sigun_amount_trend_chart(frame: pd.DataFrame):
@@ -525,19 +517,17 @@ kpi_cols = st.columns(4)
 kpi_cols[0].metric(
     "월별 신규가입자수",
     "-" if pd.isna(total_new_members) else f"{total_new_members:,.0f}명",
-    delta=None
-    if pd.isna(new_member_yoy_pct)
-    else f"{fmt_delta_count(new_member_yoy_abs)} / {fmt_pct(new_member_yoy_pct)}",
+    delta=fmt_yoy_delta(new_member_yoy_abs, new_member_yoy_pct, is_count=True),
 )
 kpi_cols[1].metric(
     "월별 충전액",
     fmt_million_money(total_charge_million),
-    delta=None if pd.isna(charge_yoy_pct) else f"{fmt_delta_million(charge_yoy_abs)} / {fmt_pct(charge_yoy_pct)}",
+    delta=fmt_yoy_delta(charge_yoy_abs, charge_yoy_pct),
 )
 kpi_cols[2].metric(
     "월별 사용액",
     fmt_million_money(total_use_million),
-    delta=None if pd.isna(use_yoy_pct) else f"{fmt_delta_million(use_yoy_abs)} / {fmt_pct(use_yoy_pct)}",
+    delta=fmt_yoy_delta(use_yoy_abs, use_yoy_pct),
 )
 kpi_cols[3].metric("사용액/충전액", "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%")
 
@@ -583,7 +573,7 @@ with tab_summary:
     )
     left, right = st.columns(2)
     left.altair_chart(
-        chart_bar(sigun_rank, "use_amount_million", "sigun_name", "시군별 사용액 Top 10", "사용액(백만원)", 10, "#0f766e"),
+        chart_bar(sigun_rank, "use_amount_million", "sigun_name", "시군별 사용액 Top 10", "사용액(백만원)", 10, "#5f9f8f"),
         use_container_width=True,
     )
     right.altair_chart(
@@ -594,7 +584,7 @@ with tab_summary:
             "시군별 충전액 Top 10",
             "충전액(백만원)",
             10,
-            "#7c3aed",
+            "#8d7ab8",
         ),
         use_container_width=True,
     )
@@ -710,7 +700,8 @@ with tab_diag:
     )
     st.caption(f"기준년월: {fmt_period_label(selected_period)} / 분석기간: {diag_window_name}")
 
-    st.markdown("#### 변동성(CV)")
+    st.markdown("#### 변동성(CV=표준편차/평균)")
+    st.caption("CV 낮음 = 평균 대비 변동이 작아 상대적으로 안정적 / CV 높음 = 평균 대비 변동이 커 상대적으로 변동 큼")
     volatility = compute_volatility_rank(diag_base, metric_col)
     if volatility.empty:
         st.info("변동성을 계산할 데이터가 부족합니다.")
@@ -724,7 +715,7 @@ with tab_diag:
                 "안정 Top 5 (CV 낮음)",
                 "CV(%)",
                 limit=5,
-                color="#2563eb",
+                color="#5b8db8",
                 value_format=",.2f",
             ),
             use_container_width=True,
@@ -737,7 +728,7 @@ with tab_diag:
                 "변동 Top 5 (CV 높음)",
                 "CV(%)",
                 limit=5,
-                color="#dc2626",
+                color="#c97b7b",
                 value_format=",.2f",
             ),
             use_container_width=True,
@@ -750,8 +741,6 @@ with tab_diag:
     else:
         inc = streaks[streaks["direction"] == "increase"].sort_values("streak_months", ascending=False).head(5).copy()
         dec = streaks[streaks["direction"] == "decrease"].sort_values("streak_months", ascending=False).head(5).copy()
-        inc["streak_months"] = inc["streak_months"].astype(float)
-        dec["streak_months"] = dec["streak_months"].astype(float)
         left, right = st.columns(2)
         left.altair_chart(
             chart_bar(
@@ -761,8 +750,10 @@ with tab_diag:
                 "증가 연속 Top 5",
                 "연속 개월",
                 limit=5,
-                color="#059669",
+                color="#5f9f8f",
                 value_format=",.0f",
+                x_axis_format="d",
+                x_tick_min_step=1,
             ),
             use_container_width=True,
         )
@@ -774,8 +765,10 @@ with tab_diag:
                 "감소 연속 Top 5",
                 "연속 개월",
                 limit=5,
-                color="#b91c1c",
+                color="#b97a7a",
                 value_format=",.0f",
+                x_axis_format="d",
+                x_tick_min_step=1,
             ),
             use_container_width=True,
         )
@@ -803,7 +796,7 @@ with tab_diag:
                     "개선 Top 5",
                     "증감률(%)",
                     limit=5,
-                    color="#059669",
+                    color="#5f9f8f",
                     value_format="+,.1f",
                 ),
                 use_container_width=True,
@@ -816,7 +809,7 @@ with tab_diag:
                     "악화 Top 5",
                     "증감률(%)",
                     limit=5,
-                    color="#dc2626",
+                    color="#c97b7b",
                     value_format="+,.1f",
                 ),
                 use_container_width=True,
