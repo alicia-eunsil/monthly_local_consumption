@@ -79,11 +79,38 @@ def fetch_ggdata_industry_sales_records(
                 if not rows:
                     attempt_logs.append(f"{service}(pSize={size}): 행 데이터 없음")
                     break
-                columns = {str(col).strip().upper() for col in rows[0].keys()}
-                if {"STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"}.issubset(columns):
+                columns = {str(col).strip() for col in rows[0].keys()}
+                keys = {_normalize_key(col) for col in columns}
+                has_period = "STDYM" in keys
+                has_sales = "SALESAMT" in keys
+                has_name = any(
+                    key in keys
+                    for key in {
+                        "LGCLASSINDTYPENM",
+                        "LGLASSINDTYPENM",
+                        "LCLASSINDTYPENM",
+                        "LGCLSINDTYPENM",
+                        "INDTYPENM",
+                    }
+                )
+                has_code = any(
+                    key in keys
+                    for key in {
+                        "MDCLASSINDTYPECD",
+                        "LGCLASSINDTYPECD",
+                        "INDTYPECD",
+                    }
+                )
+                if has_period and has_sales and (has_name or has_code):
                     return service, rows
-                missing = sorted({"STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"} - columns)
-                attempt_logs.append(f"{service}(pSize={size}): 필수 컬럼 누락({', '.join(missing)})")
+                missing_tokens = []
+                if not has_period:
+                    missing_tokens.append("STD_YM")
+                if not has_sales:
+                    missing_tokens.append("SALES_AMT")
+                if not (has_name or has_code):
+                    missing_tokens.append("LGCLASS_INDTYPE_NM or MDCLASS_INDTYPE_CD")
+                attempt_logs.append(f"{service}(pSize={size}): 필수 컬럼 누락({', '.join(missing_tokens)})")
                 break
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
@@ -195,14 +222,34 @@ def normalize_publication_use_frame(df: pd.DataFrame) -> pd.DataFrame:
 def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
     source = df.copy()
     source.columns = [str(col).strip() for col in source.columns]
-    required = ["STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"]
-    missing = [col for col in required if col not in source.columns]
+
+    period_col = _find_column(source.columns, ["STD_YM"])
+    sales_col = _find_column(source.columns, ["SALES_AMT"])
+    name_col = _find_column(
+        source.columns,
+        ["LGCLASS_INDTYPE_NM", "LGLASS_INDTYPE_NM", "LCLASS_INDTYPE_NM", "LGCLS_INDTYPE_NM"],
+        contains=["INDTYPE", "NM"],
+    )
+    code_col = _find_column(
+        source.columns,
+        ["MDCLASS_INDTYPE_CD", "LGCLASS_INDTYPE_CD", "INDTYPE_CD"],
+        contains=["INDTYPE", "CD"],
+    )
+
+    missing = []
+    if not period_col:
+        missing.append("STD_YM")
+    if not sales_col:
+        missing.append("SALES_AMT")
+    if not (name_col or code_col):
+        missing.append("LGCLASS_INDTYPE_NM or MDCLASS_INDTYPE_CD")
     if missing:
         raise RuntimeError("업종별 매출 필수 컬럼을 찾지 못했습니다: " + ", ".join(missing))
 
+    resolved_name_col = name_col or code_col or ""
     out = pd.DataFrame(
         {
-            "period_key": source["STD_YM"].map(_period_key),
+            "period_key": source[period_col].map(_period_key),
             "admong_code": source["ADMONG_CD"].fillna("").astype(str).str.strip() if "ADMONG_CD" in source.columns else "",
             "mdclass_indtype_code": source["MDCLASS_INDTYPE_CD"].fillna("").astype(str).str.strip()
             if "MDCLASS_INDTYPE_CD" in source.columns
@@ -210,7 +257,7 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
             "pub_category_code": source["PUB_CATEGORY_CD"].fillna("").astype(str).str.strip()
             if "PUB_CATEGORY_CD" in source.columns
             else "",
-            "sales_amount": source["SALES_AMT"].map(_to_float),
+            "sales_amount": source[sales_col].map(_to_float),
             "sales_rank": source["SALES_AMT_RKI"].map(_to_float) if "SALES_AMT_RKI" in source.columns else np.nan,
             "sales_rate": source["SALES_AMT_RATE"].map(_to_float) if "SALES_AMT_RATE" in source.columns else np.nan,
             "mom_abs": source["BFYM_INCNDECR_VAL"].map(_to_float) if "BFYM_INCNDECR_VAL" in source.columns else np.nan,
@@ -221,7 +268,7 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
             "yoy_pct": source["FYY_SMYM_INCNDECR_RATE"].map(_to_float)
             if "FYY_SMYM_INCNDECR_RATE" in source.columns
             else np.nan,
-            "lgclass_indtype_name": source["LGCLASS_INDTYPE_NM"].fillna("").astype(str).str.strip(),
+            "lgclass_indtype_name": source[resolved_name_col].fillna("").astype(str).str.strip(),
         }
     )
     out["period_date"] = pd.to_datetime(out["period_key"] + "01", format="%Y%m%d", errors="coerce")
@@ -301,6 +348,25 @@ def _period_key(value: object) -> str:
     digits = "".join(ch for ch in text if ch.isdigit())
     if len(digits) >= 6:
         return digits[:6]
+    return ""
+
+
+def _normalize_key(value: object) -> str:
+    return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+
+
+def _find_column(columns: pd.Index | list[str], preferred: list[str], contains: list[str] | None = None) -> str:
+    by_normalized = {_normalize_key(col): str(col) for col in columns}
+    for key in preferred:
+        normalized = _normalize_key(key)
+        if normalized in by_normalized:
+            return by_normalized[normalized]
+    if contains:
+        contains_norm = [_normalize_key(token) for token in contains]
+        for col in columns:
+            normalized_col = _normalize_key(col)
+            if all(token in normalized_col for token in contains_norm):
+                return str(col)
     return ""
 
 
