@@ -415,7 +415,7 @@ with st.sidebar:
     industry_service_input = st.text_input(
         "업종 API 서비스명(선택)",
         value=industry_service,
-        help="명세서의 요청주소 끝 서비스명만 입력하세요. 예: RegionMnyCardLgclsSales",
+        help="명세서의 요청주소 끝 서비스명만 입력하세요. 예: TB25BPTGGCARDCATLSALEM",
     ).strip()
     effective_industry_service = industry_service_input or industry_service
     if app_key:

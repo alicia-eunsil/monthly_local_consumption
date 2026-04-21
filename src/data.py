@@ -15,12 +15,6 @@ GGDATA_BASE_URL = "https://openapi.gg.go.kr"
 PUBLICATION_USE_SERVICE = "RegionMnyPublctUse"
 INDUSTRY_SALES_SERVICE_CANDIDATES = [
     "TB25BPTGGCARDCATLSALEM",
-    "RegionMnyCardLgclsSales",
-    "RegionMnyCardLgclsSls",
-    "RegionMnyCardLclassSales",
-    "RegionMnyCardLgclassSales",
-    "RegionMnyCardIndutyLgclsSales",
-    "RegionMnyCardIndutyLgclsSls",
 ]
 MAX_PAGE_SIZE = 1000
 MAX_WORKERS = 8
