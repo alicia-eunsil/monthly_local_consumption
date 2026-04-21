@@ -157,8 +157,11 @@ def chart_bar(
             x=alt.X(
                 f"{x_col}:Q",
                 title=x_title,
-                axis=alt.Axis(format=x_axis_format) if x_axis_format else alt.Axis(),
-                scale=alt.Scale(tickMinStep=x_tick_min_step) if x_tick_min_step is not None else alt.Undefined,
+                axis=(
+                    alt.Axis(format=x_axis_format, tickMinStep=x_tick_min_step)
+                    if x_axis_format or x_tick_min_step is not None
+                    else alt.Axis()
+                ),
             ),
             y=alt.Y(
                 f"{y_col}:N",
@@ -203,7 +206,7 @@ def trend_line(frame: pd.DataFrame, y_col: str, title: str, y_title: str, color:
                 alt.Tooltip(f"{y_col}:Q", title=y_title, format=",.0f"),
             ],
         )
-        .properties(height=330)
+        .properties(height=330, width="container")
     )
 
 
@@ -337,7 +340,7 @@ def yoy_bar_line(
             ],
         )
     )
-    return alt.layer(bars, line).resolve_scale(y="independent").properties(title=title, height=330)
+    return alt.layer(bars, line).resolve_scale(y="independent").properties(title=title, height=330, width="container")
 
 
 def metric_trend_table(
@@ -349,6 +352,61 @@ def metric_trend_table(
     yoy_abs_label: str,
 ):
     return
+
+
+def render_monthly_trend_charts(trend: pd.DataFrame) -> None:
+    shared_x_scale = trend_x_scale(trend)
+
+    st.markdown("#### 사용액")
+    st.altair_chart(
+        trend_line(trend, "use_amount_million", "월별 사용액 추이", "사용액(백만원)", "#0f766e", shared_x_scale),
+        use_container_width=True,
+    )
+    st.altair_chart(
+        yoy_bar_line(
+            trend,
+            "use_amount_million_yoy_abs",
+            "use_amount_million_yoy_pct",
+            "전년동월대비 사용액 추이",
+            "증감액(백만원)",
+            shared_x_scale,
+        ),
+        use_container_width=True,
+    )
+
+    st.markdown("#### 충전액")
+    st.altair_chart(
+        trend_line(trend, "charge_amount_million", "월별 충전액 추이", "충전액(백만원)", "#7c3aed", shared_x_scale),
+        use_container_width=True,
+    )
+    st.altair_chart(
+        yoy_bar_line(
+            trend,
+            "charge_amount_million_yoy_abs",
+            "charge_amount_million_yoy_pct",
+            "전년동월대비 충전액 추이",
+            "증감액(백만원)",
+            shared_x_scale,
+        ),
+        use_container_width=True,
+    )
+
+    st.markdown("#### 신규가입자")
+    st.altair_chart(
+        trend_line(trend, "new_member_count", "월별 신규가입자 추이", "신규가입자(명)", "#64748b", shared_x_scale),
+        use_container_width=True,
+    )
+    st.altair_chart(
+        yoy_bar_line(
+            trend,
+            "new_member_count_yoy_abs",
+            "new_member_count_yoy_pct",
+            "전년동월대비 신규가입자 추이",
+            "증감수(명)",
+            shared_x_scale,
+        ),
+        use_container_width=True,
+    )
 
 
 def sigun_amount_trend_chart(frame: pd.DataFrame):
@@ -481,6 +539,12 @@ trend = (
     .sort_values("period_date")
 )
 trend = add_yoy_columns(trend)
+trend["use_to_charge_rate"] = (
+    trend["use_amount_million"] / trend["charge_amount_million"].where(trend["charge_amount_million"] != 0) * 100
+)
+prev_ratio = trend["use_to_charge_rate"].shift(12)
+trend["use_to_charge_rate_yoy_abs"] = trend["use_to_charge_rate"] - prev_ratio
+trend["use_to_charge_rate_yoy_pct"] = trend["use_to_charge_rate_yoy_abs"] / prev_ratio.where(prev_ratio != 0) * 100
 
 current = filtered[filtered["period_key"] == selected_period].copy()
 selected_trend = trend[trend["period_key"] == selected_period].head(1)
@@ -511,6 +575,12 @@ new_member_yoy_abs = (
 new_member_yoy_pct = (
     float(selected_trend["new_member_count_yoy_pct"].iloc[0]) if not selected_trend.empty else float("nan")
 )
+use_to_charge_yoy_abs = (
+    float(selected_trend["use_to_charge_rate_yoy_abs"].iloc[0]) if not selected_trend.empty else float("nan")
+)
+use_to_charge_yoy_pct = (
+    float(selected_trend["use_to_charge_rate_yoy_pct"].iloc[0]) if not selected_trend.empty else float("nan")
+)
 
 st.caption(f"기준 년월: {fmt_period_label(selected_period)}")
 kpi_cols = st.columns(4)
@@ -529,9 +599,17 @@ kpi_cols[2].metric(
     fmt_million_money(total_use_million),
     delta=fmt_yoy_delta(use_yoy_abs, use_yoy_pct),
 )
-kpi_cols[3].metric("사용액/충전액", "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%")
+kpi_cols[3].metric(
+    "사용액/충전액",
+    "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%",
+    delta=(
+        "전년동월대비 없음"
+        if pd.isna(use_to_charge_yoy_abs) or pd.isna(use_to_charge_yoy_pct)
+        else f"{use_to_charge_yoy_abs:+,.1f}%p / {use_to_charge_yoy_pct:+,.1f}%"
+    ),
+)
 
-tab_summary, tab_trend, tab_diag, tab_sigun = st.tabs(["요약", "월별 추이", "진단", "시군별 현황"])
+tab_summary, tab_trend, tab_diag, tab_sigun = st.tabs(["경기도 현황", "월별 추이", "진단", "시군별 현황"])
 
 with tab_summary:
     amount_long = trend.melt(
@@ -588,6 +666,8 @@ with tab_summary:
         ),
         use_container_width=True,
     )
+    st.markdown("---")
+    render_monthly_trend_charts(trend)
 
 with tab_trend:
     shared_x_scale = trend_x_scale(trend)
