@@ -26,6 +26,9 @@ MAX_PAGE_SIZE = 1000
 MAX_WORKERS = 8
 REQUEST_TIMEOUT_SECONDS = 120
 REQUEST_RETRIES = 3
+INDUSTRY_MAX_WORKERS = 3
+INDUSTRY_REQUEST_TIMEOUT_SECONDS = 30
+INDUSTRY_REQUEST_RETRIES = 2
 
 ProgressCallback = Callable[[str, int, int], None]
 
@@ -64,6 +67,9 @@ def fetch_ggdata_industry_sales_records(
                 app_key,
                 page_size=page_size,
                 progress_callback=progress_callback,
+                max_workers=INDUSTRY_MAX_WORKERS,
+                timeout_seconds=INDUSTRY_REQUEST_TIMEOUT_SECONDS,
+                retries=INDUSTRY_REQUEST_RETRIES,
             )
             if not rows:
                 continue
@@ -85,12 +91,22 @@ def fetch_ggdata_records(
     app_key: str,
     page_size: int = MAX_PAGE_SIZE,
     progress_callback: ProgressCallback | None = None,
+    max_workers: int = MAX_WORKERS,
+    timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
+    retries: int = REQUEST_RETRIES,
 ) -> list[dict]:
     if not app_key:
         raise RuntimeError("APP_KEY가 설정되어 있지 않습니다.")
 
     safe_page_size = min(max(int(page_size), 1), MAX_PAGE_SIZE)
-    first_payload = _fetch_ggdata_page(service, app_key, 1, safe_page_size)
+    first_payload = _fetch_ggdata_page(
+        service,
+        app_key,
+        1,
+        safe_page_size,
+        timeout_seconds=timeout_seconds,
+        retries=retries,
+    )
     _raise_result_error(first_payload)
     total_count = _extract_total_count(first_payload, service)
     rows = _extract_rows(first_payload, service)
@@ -105,9 +121,17 @@ def fetch_ggdata_records(
         progress_callback(service, 1, total_pages)
 
     page_rows: dict[int, list[dict]] = {1: rows}
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+    with ThreadPoolExecutor(max_workers=max(1, int(max_workers))) as executor:
         futures = {
-            executor.submit(_fetch_ggdata_page, service, app_key, page_index, safe_page_size): page_index
+            executor.submit(
+                _fetch_ggdata_page,
+                service,
+                app_key,
+                page_index,
+                safe_page_size,
+                timeout_seconds,
+                retries,
+            ): page_index
             for page_index in range(2, total_pages + 1)
         }
         for future in as_completed(futures):
@@ -185,7 +209,14 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _fetch_ggdata_page(service: str, app_key: str, page_index: int, page_size: int) -> dict:
+def _fetch_ggdata_page(
+    service: str,
+    app_key: str,
+    page_index: int,
+    page_size: int,
+    timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
+    retries: int = REQUEST_RETRIES,
+) -> dict:
     params = {
         "Key": app_key,
         "Type": "json",
@@ -195,13 +226,15 @@ def _fetch_ggdata_page(service: str, app_key: str, page_index: int, page_size: i
     url = f"{GGDATA_BASE_URL}/{service}?{urlencode(params)}"
     request = Request(url, headers={"User-Agent": "monthly-local-consumption/1.0"})
     last_error: Exception | None = None
-    for attempt in range(1, REQUEST_RETRIES + 1):
+    safe_retries = max(1, int(retries))
+    safe_timeout = max(5, int(timeout_seconds))
+    for attempt in range(1, safe_retries + 1):
         try:
-            with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            with urlopen(request, timeout=safe_timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except (TimeoutError, URLError) as exc:
             last_error = exc
-            if attempt == REQUEST_RETRIES:
+            if attempt == safe_retries:
                 break
         except json.JSONDecodeError as exc:
             raise RuntimeError("경기데이터드림 Open API 응답을 JSON으로 해석할 수 없습니다.") from exc
