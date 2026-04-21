@@ -59,6 +59,7 @@ def fetch_ggdata_industry_sales_records(
         if service not in candidates:
             candidates.append(service)
 
+    attempt_logs: list[str] = []
     last_error: Exception | None = None
     for service in candidates:
         try:
@@ -72,17 +73,24 @@ def fetch_ggdata_industry_sales_records(
                 retries=INDUSTRY_REQUEST_RETRIES,
             )
             if not rows:
+                attempt_logs.append(f"{service}: 행 데이터 없음")
                 continue
             columns = {str(col).strip().upper() for col in rows[0].keys()}
             if {"STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"}.issubset(columns):
                 return service, rows
+            missing = sorted({"STD_YM", "SALES_AMT", "LGCLASS_INDTYPE_NM"} - columns)
+            attempt_logs.append(f"{service}: 필수 컬럼 누락({', '.join(missing)})")
         except Exception as exc:  # noqa: BLE001
             last_error = exc
+            message = str(exc).strip()
+            attempt_logs.append(f"{service}: 호출 실패({message})")
 
     hint = ", ".join(candidates)
+    details = " | ".join(attempt_logs[:7])
     raise RuntimeError(
         "업종별 매출 API를 찾지 못했습니다. "
-        f"INDUSTRY_SERVICE 값을 설정하거나 후보 서비스명을 확인해 주세요. ({hint})"
+        f"입력한 서비스명/후보 서비스명을 확인해 주세요. ({hint})"
+        + (f" / 상세: {details}" if details else "")
     ) from last_error
 
 
