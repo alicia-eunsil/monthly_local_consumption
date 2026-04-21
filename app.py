@@ -867,7 +867,8 @@ with tab_diag:
             )
 
     st.markdown("---")
-    st.markdown("#### 분석기간 기반 진단")
+    st.markdown("#### 변동성(CV=표준편차/평균)")
+    st.caption("CV 낮음 = 평균 대비 변동이 작아 상대적으로 안정적 / CV 높음 = 평균 대비 변동이 커 상대적으로 변동 큼")
     diag_window_name = st.radio(
         "분석 기간",
         list(period_window_map.keys()),
@@ -883,9 +884,6 @@ with tab_diag:
         window_months,
     )
     st.caption(f"기준년월: {fmt_period_label(selected_period)} / 분석기간: {diag_window_name}")
-
-    st.markdown("#### 변동성(CV=표준편차/평균)")
-    st.caption("CV 낮음 = 평균 대비 변동이 작아 상대적으로 안정적 / CV 높음 = 평균 대비 변동이 커 상대적으로 변동 큼")
     volatility = compute_volatility_rank(diag_base, metric_col)
     if volatility.empty:
         st.info("변동성을 계산할 데이터가 부족합니다.")
