@@ -137,6 +137,7 @@ def chart_bar(
     x_title: str,
     limit: int = 15,
     color: str = "#2563eb",
+    value_format: str = ",.0f",
 ):
     data = frame.head(limit).copy()
     bars = (
@@ -152,7 +153,7 @@ def chart_bar(
             ),
             tooltip=[
                 alt.Tooltip(f"{y_col}:N", title="시군"),
-                alt.Tooltip(f"{x_col}:Q", title=x_title, format=",.0f"),
+                alt.Tooltip(f"{x_col}:Q", title=x_title, format=value_format),
             ],
         )
     )
@@ -162,7 +163,7 @@ def chart_bar(
         .encode(
             x=alt.X(f"{x_col}:Q"),
             y=alt.Y(f"{y_col}:N", sort="-x"),
-            text=alt.Text(f"{x_col}:Q", format=",.0f"),
+            text=alt.Text(f"{x_col}:Q", format=value_format),
         )
     )
     return alt.layer(bars, labels).properties(height=max(340, min(720, len(data) * 38)))
@@ -206,6 +207,78 @@ def add_sigun_yoy_columns(frame: pd.DataFrame) -> pd.DataFrame:
     for _, group in frame.groupby("sigun_name", dropna=False):
         parts.append(add_yoy_columns(group))
     return pd.concat(parts, ignore_index=True) if parts else frame.copy()
+
+
+def build_windowed_sigun_metric(
+    frame: pd.DataFrame,
+    value_col: str,
+    end_period_key: str,
+    months: int,
+) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    end_rows = frame[frame["period_key"] == end_period_key]
+    if end_rows.empty:
+        return pd.DataFrame()
+    end_date = end_rows["period_date"].max()
+    if pd.isna(end_date):
+        return pd.DataFrame()
+    start_date = end_date - pd.DateOffset(months=max(1, int(months)) - 1)
+    windowed = frame[(frame["period_date"] >= start_date) & (frame["period_date"] <= end_date)].copy()
+    return (
+        windowed[["sigun_name", "period_key", "period_date", value_col]]
+        .dropna(subset=["sigun_name", value_col])
+        .sort_values(["sigun_name", "period_date"])
+    )
+
+
+def compute_volatility_rank(
+    frame: pd.DataFrame,
+    value_col: str,
+    min_points: int = 3,
+) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame()
+    out = (
+        frame.groupby("sigun_name", as_index=False)[value_col]
+        .agg(["count", "mean", "std"])
+        .reset_index()
+        .rename(columns={"count": "n", "mean": "mean_val", "std": "std_val"})
+    )
+    out = out[out["n"] >= int(min_points)].copy()
+    out["cv_pct"] = out["std_val"] / out["mean_val"].where(out["mean_val"] != 0) * 100
+    out = out.dropna(subset=["cv_pct"])
+    return out.sort_values("cv_pct")
+
+
+def compute_current_streaks(frame: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame(columns=["sigun_name", "direction", "streak_months"])
+    records: list[dict] = []
+    for sigun, group in frame.groupby("sigun_name", dropna=False):
+        g = group.sort_values("period_date").copy()
+        diff = g[value_col].diff().dropna()
+        if diff.empty:
+            continue
+        direction = 1 if diff.iloc[-1] > 0 else (-1 if diff.iloc[-1] < 0 else 0)
+        if direction == 0:
+            continue
+        streak = 0
+        for value in diff.iloc[::-1]:
+            sign = 1 if value > 0 else (-1 if value < 0 else 0)
+            if sign == direction:
+                streak += 1
+            else:
+                break
+        if streak > 0:
+            records.append(
+                {
+                    "sigun_name": sigun,
+                    "direction": "increase" if direction > 0 else "decrease",
+                    "streak_months": streak,
+                }
+            )
+    return pd.DataFrame(records)
 
 
 def yoy_bar_line(
@@ -468,7 +541,7 @@ kpi_cols[2].metric(
 )
 kpi_cols[3].metric("사용액/충전액", "-" if pd.isna(use_to_charge_rate) else f"{use_to_charge_rate:,.1f}%")
 
-tab_summary, tab_trend, tab_sigun = st.tabs(["요약", "월별 추이", "시군별 현황"])
+tab_summary, tab_trend, tab_diag, tab_sigun = st.tabs(["요약", "월별 추이", "진단", "시군별 현황"])
 
 with tab_summary:
     amount_long = trend.melt(
@@ -612,6 +685,142 @@ with tab_trend:
             "월데이터(명)",
             "전년동월대비 증감(명)",
         )
+
+with tab_diag:
+    metric_map = {
+        "사용액": ("use_amount_million", "사용액(백만원)"),
+        "충전액": ("charge_amount_million", "충전액(백만원)"),
+        "신규가입자": ("new_member_count", "신규가입자(명)"),
+    }
+    period_window_map = {"최근 6개월": 6, "최근 12개월": 12, "최근 24개월": 24}
+
+    d1, d2 = st.columns([2, 2])
+    with d1:
+        diag_metric = st.selectbox("진단 지표", list(metric_map.keys()), index=0, key="diag_metric")
+    with d2:
+        diag_window_name = st.selectbox("분석 기간", list(period_window_map.keys()), index=1, key="diag_window")
+
+    metric_col, _metric_label = metric_map[diag_metric]
+    window_months = period_window_map[diag_window_name]
+    diag_base = build_windowed_sigun_metric(
+        filtered[["sigun_name", "period_key", "period_date", metric_col]].copy(),
+        metric_col,
+        selected_period,
+        window_months,
+    )
+    st.caption(f"기준년월: {fmt_period_label(selected_period)} / 분석기간: {diag_window_name}")
+
+    st.markdown("#### 변동성(CV)")
+    volatility = compute_volatility_rank(diag_base, metric_col)
+    if volatility.empty:
+        st.info("변동성을 계산할 데이터가 부족합니다.")
+    else:
+        left, right = st.columns(2)
+        left.altair_chart(
+            chart_bar(
+                volatility,
+                "cv_pct",
+                "sigun_name",
+                "안정 Top 5 (CV 낮음)",
+                "CV(%)",
+                limit=5,
+                color="#2563eb",
+                value_format=",.2f",
+            ),
+            use_container_width=True,
+        )
+        right.altair_chart(
+            chart_bar(
+                volatility.sort_values("cv_pct", ascending=False),
+                "cv_pct",
+                "sigun_name",
+                "변동 Top 5 (CV 높음)",
+                "CV(%)",
+                limit=5,
+                color="#dc2626",
+                value_format=",.2f",
+            ),
+            use_container_width=True,
+        )
+
+    st.markdown("#### 최근 연속 증가/감소")
+    streaks = compute_current_streaks(diag_base, metric_col)
+    if streaks.empty:
+        st.info("연속 증가/감소를 계산할 데이터가 부족합니다.")
+    else:
+        inc = streaks[streaks["direction"] == "increase"].sort_values("streak_months", ascending=False).head(5).copy()
+        dec = streaks[streaks["direction"] == "decrease"].sort_values("streak_months", ascending=False).head(5).copy()
+        inc["streak_months"] = inc["streak_months"].astype(float)
+        dec["streak_months"] = dec["streak_months"].astype(float)
+        left, right = st.columns(2)
+        left.altair_chart(
+            chart_bar(
+                inc,
+                "streak_months",
+                "sigun_name",
+                "증가 연속 Top 5",
+                "연속 개월",
+                limit=5,
+                color="#059669",
+                value_format=",.0f",
+            ),
+            use_container_width=True,
+        )
+        right.altair_chart(
+            chart_bar(
+                dec,
+                "streak_months",
+                "sigun_name",
+                "감소 연속 Top 5",
+                "연속 개월",
+                limit=5,
+                color="#b91c1c",
+                value_format=",.0f",
+            ),
+            use_container_width=True,
+        )
+
+    st.markdown("#### 전년동월 대비 개선/악화")
+    sigun_yoy = add_sigun_yoy_columns(filtered)
+    yoy_col = f"{metric_col}_yoy_pct"
+    if yoy_col not in sigun_yoy.columns:
+        st.info("선택한 지표의 전년동월 비교 컬럼이 없습니다.")
+    else:
+        yoy_rows = (
+            sigun_yoy[sigun_yoy["period_key"] == selected_period]
+            .dropna(subset=[yoy_col])
+            .sort_values(yoy_col, ascending=False)
+        )
+        if yoy_rows.empty:
+            st.info("전년동월 대비를 계산할 데이터가 부족합니다.")
+        else:
+            left, right = st.columns(2)
+            left.altair_chart(
+                chart_bar(
+                    yoy_rows,
+                    yoy_col,
+                    "sigun_name",
+                    "개선 Top 5",
+                    "증감률(%)",
+                    limit=5,
+                    color="#059669",
+                    value_format="+,.1f",
+                ),
+                use_container_width=True,
+            )
+            right.altair_chart(
+                chart_bar(
+                    yoy_rows.sort_values(yoy_col, ascending=True),
+                    yoy_col,
+                    "sigun_name",
+                    "악화 Top 5",
+                    "증감률(%)",
+                    limit=5,
+                    color="#dc2626",
+                    value_format="+,.1f",
+                ),
+                use_container_width=True,
+            )
 
 with tab_sigun:
     st.caption(f"기준년월: {fmt_period_label(selected_period)}")
