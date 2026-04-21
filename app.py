@@ -487,7 +487,7 @@ def sigun_yoy_rank_chart(frame: pd.DataFrame, limit: int = 15):
 require_access_code()
 
 st.title("경기도 지역화폐 발행·이용 현황")
-st.caption("최신 월별 신규가입자수, 충전액, 사용액을 시군 단위로 확인합니다.")
+st.caption("최신 월별 신규가입자수, 충전액, 사용액을 시군 단위로 확인합니다. (지역별 사용액, 충전액, 신규가입자수에 대해 최근일 기준 데이터 제공으로 분석에 한계 발생)")
 
 with st.sidebar:
     st.subheader("데이터")
@@ -587,7 +587,7 @@ use_to_charge_yoy_pct = (
     float(selected_trend["use_to_charge_rate_yoy_pct"].iloc[0]) if not selected_trend.empty else float("nan")
 )
 
-st.caption(f"기준 년월: {fmt_period_label(selected_period)}")
+st.caption(f"기준 년월: {fmt_period_label(selected_period)} / 출처: 경기데이터드림")
 kpi_cols = st.columns(4)
 kpi_cols[0].metric(
     "월별 신규가입자수",
@@ -965,46 +965,53 @@ with tab_sigun:
     if sigun_trend.empty:
         st.info("월별 추이를 볼 시군을 선택해 주세요.")
     else:
-        st.altair_chart(sigun_amount_trend_chart(sigun_trend), use_container_width=True)
         sigun_trend_yoy = add_yoy_columns(sigun_trend.sort_values("period_date").copy())
-        yoy_ready = sigun_trend_yoy[
-            [
+        sigun_x_scale = trend_x_scale(sigun_trend_yoy)
+
+        st.altair_chart(
+            trend_line(sigun_trend_yoy, "use_amount_million", "사용액 추이", "사용액(백만원)", "#0f766e", sigun_x_scale),
+            use_container_width=True,
+        )
+        st.altair_chart(
+            yoy_bar_line(
+                sigun_trend_yoy,
                 "use_amount_million_yoy_abs",
+                "use_amount_million_yoy_pct",
+                "전년동월대비 사용액 추이",
+                "증감액(백만원)",
+                sigun_x_scale,
+            ),
+            use_container_width=True,
+        )
+
+        st.altair_chart(
+            trend_line(sigun_trend_yoy, "charge_amount_million", "충전액 추이", "충전액(백만원)", "#7c3aed", sigun_x_scale),
+            use_container_width=True,
+        )
+        st.altair_chart(
+            yoy_bar_line(
+                sigun_trend_yoy,
                 "charge_amount_million_yoy_abs",
+                "charge_amount_million_yoy_pct",
+                "전년동월대비 충전액 추이",
+                "증감액(백만원)",
+                sigun_x_scale,
+            ),
+            use_container_width=True,
+        )
+
+        st.altair_chart(
+            trend_line(sigun_trend_yoy, "new_member_count", "신규가입자수 추이", "신규가입자수(명)", "#64748b", sigun_x_scale),
+            use_container_width=True,
+        )
+        st.altair_chart(
+            yoy_bar_line(
+                sigun_trend_yoy,
                 "new_member_count_yoy_abs",
-            ]
-        ].dropna(how="all")
-        st.markdown("#### 시군별 전년동월대비 증감 추이")
-        if yoy_ready.empty:
-            st.info("전년동월대비 추이를 보려면 최소 13개월 이상의 데이터가 필요합니다.")
-        else:
-            st.altair_chart(
-                yoy_bar_line(
-                    sigun_trend_yoy,
-                    "use_amount_million_yoy_abs",
-                    "use_amount_million_yoy_pct",
-                    "전년동월대비 사용액 추이",
-                    "증감액(백만원)",
-                ),
-                use_container_width=True,
-            )
-            st.altair_chart(
-                yoy_bar_line(
-                    sigun_trend_yoy,
-                    "charge_amount_million_yoy_abs",
-                    "charge_amount_million_yoy_pct",
-                    "전년동월대비 충전액 추이",
-                    "증감액(백만원)",
-                ),
-                use_container_width=True,
-            )
-            st.altair_chart(
-                yoy_bar_line(
-                    sigun_trend_yoy,
-                    "new_member_count_yoy_abs",
-                    "new_member_count_yoy_pct",
-                    "전년동월대비 신규가입자 추이",
-                    "증감수(명)",
-                ),
-                use_container_width=True,
-            )
+                "new_member_count_yoy_pct",
+                "전년동월대비 신규가입자수 추이",
+                "증감수(명)",
+                sigun_x_scale,
+            ),
+            use_container_width=True,
+        )
