@@ -12,6 +12,8 @@ from src.data import (
 )
 from src.settings import get_access_code, get_app_key, get_industry_service
 
+DEFAULT_INDUSTRY_SERVICE = "REGIONMNYAGEGND"
+
 
 st.set_page_config(
     page_title="경기도 지역화폐 발행·이용 현황",
@@ -91,7 +93,7 @@ def load_industry_with_progress(app_key: str, industry_service: str) -> tuple[pd
     def update_industry(_service: str, done: int, total: int) -> None:
         safe_total = max(total, 1)
         percent = min(99, int(100 * done / safe_total))
-        status.info(f"업종 매출 데이터를 불러오는 중... ({done:,}/{safe_total:,} 페이지)")
+        status.info(f"성연령 매출 데이터를 불러오는 중... ({done:,}/{safe_total:,} 페이지)")
         progress.progress(percent)
 
     try:
@@ -109,9 +111,9 @@ def load_industry_with_progress(app_key: str, industry_service: str) -> tuple[pd
             industry_error = str(exc)
         progress.progress(100)
         if industry.empty:
-            status.warning("업종 매출 로딩 실패")
+            status.warning("성연령 매출 로딩 실패")
         else:
-            status.success("업종 매출 로딩 완료")
+            status.success("성연령 매출 로딩 완료")
         return industry, service_used, industry_error
     finally:
         progress.empty()
@@ -150,6 +152,8 @@ def fmt_pct(value: float) -> str:
 
 def fmt_period_label(value: str) -> str:
     text = str(value).replace("-", "")
+    if len(text) == 4 and text.isdigit():
+        return f"{text}년"
     if len(text) == 6 and text.isdigit():
         return f"{text[:4]}년 {text[4:]}월"
     return str(value)
@@ -411,13 +415,13 @@ st.caption("최신 월별 신규가입자수, 충전액, 사용액을 시군 단
 with st.sidebar:
     st.subheader("데이터")
     app_key = get_app_key()
-    industry_service = get_industry_service()
+    industry_service = get_industry_service() or DEFAULT_INDUSTRY_SERVICE
     industry_service_input = st.text_input(
         "성연령 API 서비스명(선택)",
         value=industry_service,
         help="명세서의 요청주소 끝 서비스명만 입력하세요. 예: TBDASSIGNRMSALESSEXAGES",
     ).strip()
-    effective_industry_service = industry_service_input or industry_service
+    effective_industry_service = industry_service_input or DEFAULT_INDUSTRY_SERVICE
     if app_key:
         st.success("APP_KEY 설정됨")
         if st.button("데이터 새로고침"):
@@ -713,7 +717,7 @@ with tab_industry:
         if selected_period in industry_period_options:
             default_index = industry_period_options.index(selected_period)
 
-        control_left, control_mid, control_right = st.columns([2, 2, 1])
+        control_left, control_mid, control_right = st.columns([2, 3, 1])
         with control_left:
             selected_industry_period = st.selectbox(
                 "성연령 기준년월",
@@ -722,38 +726,43 @@ with tab_industry:
                 key="industry_period",
             )
         with control_mid:
-            pub_options = ["전체"] + sorted([x for x in industry["pub_category_code"].dropna().unique() if x])
-            selected_pub = st.selectbox("발행구분", options=pub_options, index=0, key="industry_pub")
+            industry_sigun_options = sorted([x for x in industry["sigun_name"].dropna().unique() if x])
+            selected_industry_siguns = st.multiselect(
+                "시군(성연령)",
+                options=industry_sigun_options,
+                default=[],
+                key="industry_siguns",
+                placeholder="전체",
+            )
         with control_right:
             top_n = int(st.number_input("Top N", min_value=5, max_value=30, value=10, step=1))
 
         industry_base = industry.copy()
-        if selected_pub != "전체":
-            industry_base = industry_base[industry_base["pub_category_code"] == selected_pub]
+        if selected_industry_siguns:
+            industry_base = industry_base[industry_base["sigun_name"].isin(selected_industry_siguns)]
 
-        industry_trend = (
-            industry_base.groupby(["period_key", "period_date", "lgclass_indtype_name"], as_index=False)["sales_amount"]
-            .sum()
-            .sort_values("period_date")
-        )
-        industry_trend = add_industry_change_columns(industry_trend)
-
-        current_industry = industry_trend[industry_trend["period_key"] == selected_industry_period].copy()
+        current_industry = industry_base[industry_base["period_key"] == selected_industry_period].copy()
         if current_industry.empty:
             st.warning("선택한 기준년월의 성연령 데이터가 없습니다.")
         else:
             rank = (
-                current_industry.groupby("lgclass_indtype_name", as_index=False)[
-                    ["sales_amount", "mom_abs", "mom_pct", "yoy_abs", "yoy_pct"]
-                ]
-                .sum(numeric_only=True)
+                current_industry.groupby("segment_name", as_index=False)
+                .agg(
+                    {
+                        "sales_amount": "sum",
+                        "payment_count": "sum",
+                        "avg_payment_amount": "mean",
+                    }
+                )
                 .sort_values("sales_amount", ascending=False)
             )
+            total_sales = float(rank["sales_amount"].sum()) if not rank.empty else 0.0
+            rank["sales_share_pct"] = rank["sales_amount"] / total_sales * 100 if total_sales > 0 else 0.0
             st.altair_chart(
                 chart_bar(
                     rank,
                     "sales_amount",
-                    "lgclass_indtype_name",
+                    "segment_name",
                     f"성연령별 매출 Top {top_n}",
                     "매출액",
                     limit=top_n,
@@ -766,21 +775,19 @@ with tab_industry:
                 rank.head(top_n)
                 .rename(
                     columns={
-                        "lgclass_indtype_name": "성연령코드",
+                        "segment_name": "성연령구분",
                         "sales_amount": "매출액",
-                        "mom_abs": "전월대비 증감액",
-                        "mom_pct": "전월대비 증감률(%)",
-                        "yoy_abs": "전년동월대비 증감액",
-                        "yoy_pct": "전년동월대비 증감률(%)",
+                        "sales_share_pct": "매출비율(%)",
+                        "payment_count": "결제건수",
+                        "avg_payment_amount": "1회평균결제금액",
                     }
                 )
                 .style.format(
                     {
                         "매출액": "{:,.0f}",
-                        "전월대비 증감액": "{:,.0f}",
-                        "전월대비 증감률(%)": "{:+,.1f}",
-                        "전년동월대비 증감액": "{:,.0f}",
-                        "전년동월대비 증감률(%)": "{:+,.1f}",
+                        "매출비율(%)": "{:,.2f}",
+                        "결제건수": "{:,.0f}",
+                        "1회평균결제금액": "{:,.0f}",
                     },
                     na_rep="-",
                 ),

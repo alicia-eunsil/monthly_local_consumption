@@ -14,8 +14,7 @@ import pandas as pd
 GGDATA_BASE_URL = "https://openapi.gg.go.kr"
 PUBLICATION_USE_SERVICE = "RegionMnyPublctUse"
 INDUSTRY_SALES_SERVICE_CANDIDATES = [
-    "TBDASSIGNRMSALESSEXAGES",
-    "TB25BPTGGCARDCATLSALEM",
+    "REGIONMNYAGEGND",
 ]
 MAX_PAGE_SIZE = 1000
 MAX_WORKERS = 8
@@ -76,11 +75,13 @@ def fetch_ggdata_industry_sales_records(
                     break
                 columns = {str(col).strip() for col in rows[0].keys()}
                 keys = {_normalize_key(col) for col in columns}
-                has_period = "STDYM" in keys
-                has_sales = "SALESAMT" in keys
+                has_period = ("STDYM" in keys) or ("STDYY" in keys)
+                has_sales = ("SALESAMT" in keys) or ("CMPTAMT" in keys)
                 has_name = any(
                     key in keys
                     for key in {
+                        "SEXDIV",
+                        "AGEDIV",
                         "LGCLASSINDTYPENM",
                         "LGCLASSINDUTYPENM",
                         "LGLASSINDTYPENM",
@@ -101,6 +102,7 @@ def fetch_ggdata_industry_sales_records(
                     key in keys
                     for key in {
                         "SEXAGECD",
+                        "SIGNCD",
                         "MDCLASSINDTYPECD",
                         "MDCLASSINDUTYPECD",
                         "LGCLASSINDTYPECD",
@@ -116,11 +118,11 @@ def fetch_ggdata_industry_sales_records(
                     return service, rows
                 missing_tokens = []
                 if not has_period:
-                    missing_tokens.append("STD_YM")
+                    missing_tokens.append("STD_YM or STD_YY")
                 if not has_sales:
-                    missing_tokens.append("SALES_AMT")
+                    missing_tokens.append("SALES_AMT or CMPT_AMT")
                 if not (has_name or has_code):
-                    missing_tokens.append("LGCLASS_INDTYPE_NM or MDCLASS_INDTYPE_CD")
+                    missing_tokens.append("SEX_AGE_CD or AGE_DIV/SEX_DIV")
                 sample_cols = ", ".join(sorted(columns)[:12])
                 attempt_logs.append(
                     f"{service}(pSize={size}): 필수 컬럼 누락({', '.join(missing_tokens)})"
@@ -143,7 +145,7 @@ def fetch_ggdata_industry_sales_records(
     hint = ", ".join(candidates)
     details = " | ".join(attempt_logs[:7])
     raise RuntimeError(
-        "업종별 매출 API를 찾지 못했습니다. "
+        "성연령별 매출 API를 찾지 못했습니다. "
         f"입력한 서비스명/후보 서비스명을 확인해 주세요. ({hint})"
         + (f" / 상세: {details}" if details else "")
     ) from last_error
@@ -238,11 +240,14 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
     source = df.copy()
     source.columns = [str(col).strip() for col in source.columns]
 
-    period_col = _find_column(source.columns, ["STD_YM"])
-    sales_col = _find_column(source.columns, ["SALES_AMT"])
+    period_col = _find_column(source.columns, ["STD_YM", "STD_YY"])
+    sales_col = _find_column(source.columns, ["SALES_AMT", "CMPT_AMT"])
     name_col = _find_column(
         source.columns,
         [
+            "SEX_AGE_CD",
+            "AGE_DIV",
+            "SEX_DIV",
             "LGCLASS_INDTYPE_NM",
             "LGCLASS_INDUTYPE_NM",
             "LGLASS_INDTYPE_NM",
@@ -262,6 +267,8 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
         source.columns,
         [
             "SEX_AGE_CD",
+            "SEX_DIV",
+            "AGE_DIV",
             "MDCLASS_INDTYPE_CD",
             "MDCLASS_INDUTYPE_CD",
             "LGCLASS_INDTYPE_CD",
@@ -274,7 +281,8 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
         ],
         contains=["CD"],
     )
-    admong_col = _find_column(source.columns, ["ADMONG_CD", "ADMDONG_CD", "SIGN_CD"])
+    sigun_col = _find_column(source.columns, ["SIGUN_NM"])
+    sign_col = _find_column(source.columns, ["SIGN_CD"])
     sales_rank_col = _find_column(source.columns, ["SALES_AMT_RKI"])
     sales_rate_col = _find_column(source.columns, ["SALES_AMT_RATE"])
     mom_abs_col = _find_column(source.columns, ["BFYM_INCNDECR_VAL"])
@@ -284,27 +292,34 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
 
     missing = []
     if not period_col:
-        missing.append("STD_YM")
+        missing.append("STD_YM or STD_YY")
     if not sales_col:
-        missing.append("SALES_AMT")
+        missing.append("SALES_AMT or CMPT_AMT")
     if not (name_col or code_col):
-        missing.append("LGCLASS_INDTYPE_NM or MDCLASS_INDTYPE_CD")
+        missing.append("SEX_AGE_CD or AGE_DIV/SEX_DIV")
     if missing:
-        raise RuntimeError("업종별 매출 필수 컬럼을 찾지 못했습니다: " + ", ".join(missing))
+        raise RuntimeError("성연령별 매출 필수 컬럼을 찾지 못했습니다: " + ", ".join(missing))
 
     resolved_name_col = name_col or code_col or ""
-    resolved_code_col = code_col or _find_column(
-        source.columns,
-        ["MDCLASS_INDTYPE_CD", "MDCLASS_INDUTYPE_CD", "LGCLASS_INDTYPE_CD", "LGCLASS_INDUTYPE_CD"],
-    )
+    age_col = _find_column(source.columns, ["AGE_DIV"])
+    sex_col = _find_column(source.columns, ["SEX_DIV"])
+    payment_count_col = _find_column(source.columns, ["CMPT_NOC"])
+    cancel_count_col = _find_column(source.columns, ["CMPT_RTRCN_NOC"])
+    cancel_amount_col = _find_column(source.columns, ["CMPT_CANCL_AMT"])
+    avg_amount_col = _find_column(source.columns, ["TH1_AVG_CMPT_AMT"])
+
+    label_series = source[resolved_name_col].fillna("").astype(str).str.strip()
+    if age_col or sex_col:
+        age_series = source[age_col].fillna("").astype(str).str.strip() if age_col else ""
+        sex_series = source[sex_col].fillna("").astype(str).str.strip() if sex_col else ""
+        combined = (sex_series + " " + age_series).str.strip() if isinstance(age_series, pd.Series) else label_series
+        label_series = label_series.where(label_series != "", combined)
+
     out = pd.DataFrame(
         {
             "period_key": source[period_col].map(_period_key),
-            "admong_code": source[admong_col].fillna("").astype(str).str.strip() if admong_col else "",
-            "mdclass_indtype_code": source[resolved_code_col].fillna("").astype(str).str.strip() if resolved_code_col else "",
-            "pub_category_code": source["PUB_CATEGORY_CD"].fillna("").astype(str).str.strip()
-            if "PUB_CATEGORY_CD" in source.columns
-            else "",
+            "sigun_name": source[sigun_col].fillna("").astype(str).str.strip() if sigun_col else "",
+            "sign_code": source[sign_col].fillna("").astype(str).str.strip() if sign_col else "",
             "sales_amount": source[sales_col].map(_to_float),
             "sales_rank": source[sales_rank_col].map(_to_float) if sales_rank_col else np.nan,
             "sales_rate": source[sales_rate_col].map(_to_float) if sales_rate_col else np.nan,
@@ -312,13 +327,17 @@ def normalize_industry_sales_frame(df: pd.DataFrame) -> pd.DataFrame:
             "mom_pct": source[mom_pct_col].map(_to_float) if mom_pct_col else np.nan,
             "yoy_abs": source[yoy_abs_col].map(_to_float) if yoy_abs_col else np.nan,
             "yoy_pct": source[yoy_pct_col].map(_to_float) if yoy_pct_col else np.nan,
-            "lgclass_indtype_name": source[resolved_name_col].fillna("").astype(str).str.strip(),
+            "payment_count": source[payment_count_col].map(_to_float) if payment_count_col else np.nan,
+            "cancel_count": source[cancel_count_col].map(_to_float) if cancel_count_col else np.nan,
+            "cancel_amount": source[cancel_amount_col].map(_to_float) if cancel_amount_col else np.nan,
+            "avg_payment_amount": source[avg_amount_col].map(_to_float) if avg_amount_col else np.nan,
+            "segment_name": label_series,
             "sex_age_code": source["SEX_AGE_CD"].fillna("").astype(str).str.strip() if "SEX_AGE_CD" in source.columns else "",
         }
     )
-    out["period_date"] = pd.to_datetime(out["period_key"] + "01", format="%Y%m%d", errors="coerce")
+    out["period_date"] = out["period_key"].map(_period_date_from_key)
     out = out.dropna(subset=["period_date"])
-    out = out[out["lgclass_indtype_name"] != ""]
+    out = out[out["segment_name"] != ""]
     return out
 
 
@@ -393,7 +412,18 @@ def _period_key(value: object) -> str:
     digits = "".join(ch for ch in text if ch.isdigit())
     if len(digits) >= 6:
         return digits[:6]
+    if len(digits) == 4:
+        return digits
     return ""
+
+
+def _period_date_from_key(value: object) -> pd.Timestamp:
+    key = str(value or "").strip()
+    if len(key) == 4 and key.isdigit():
+        return pd.to_datetime(key + "-01-01", format="%Y-%m-%d", errors="coerce")
+    if len(key) == 6 and key.isdigit():
+        return pd.to_datetime(key + "01", format="%Y%m%d", errors="coerce")
+    return pd.NaT
 
 
 def _normalize_key(value: object) -> str:
