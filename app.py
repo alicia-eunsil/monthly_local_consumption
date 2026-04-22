@@ -760,9 +760,21 @@ with tab_sigun:
         .sum()
         .sort_values("use_amount_million", ascending=False)
     )
-    left, right = st.columns(2)
+    left, middle, right = st.columns(3)
     left.altair_chart(
         chart_bar(sigun_rank, "use_amount_million", "sigun_name", "시군별 사용액 순위", "사용액(백만원)", 31, "#0f766e"),
+        use_container_width=True,
+    )
+    middle.altair_chart(
+        chart_bar(
+            sigun_rank.sort_values("charge_amount_million", ascending=False),
+            "charge_amount_million",
+            "sigun_name",
+            "시군별 충전액 순위",
+            "충전액(백만원)",
+            31,
+            "#7c3aed",
+        ),
         use_container_width=True,
     )
     right.altair_chart(
