@@ -415,7 +415,7 @@ with title_col:
     st.title("경기도 지역화폐 발행·이용 현황")
 with info_col:
     st.button("ⓘ 안내", key="service_info_hover", help=service_info_help, type="secondary")
-st.caption("최신 월별 신규가입자수, 충전액, 사용액을 시군 단위로 확인합니다. (지역별 사용액, 충전액, 신규가입자수에 대해 최근일 기준 데이터 제공으로 분석에 한계 발생)")
+st.caption("최신 월별 신규가입자수, 충전액, 사용액을 시군 단위로 확인합니다.")
 period_caption_placeholder = st.empty()
 
 with st.sidebar:
