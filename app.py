@@ -557,10 +557,10 @@ with tab_summary:
             else f"{use_to_charge_yoy_abs:+,.1f}%p / {use_to_charge_yoy_pct:+,.1f}%"
         ),
     )
-    kpi_cols[4].metric("전체기간 사용액 최고", use_max_value, delta=use_max_period)
-    kpi_cols[5].metric("전체기간 사용액 최저", use_min_value, delta=use_min_period)
-    kpi_cols[6].metric("전체기간 충전액 최고", charge_max_value, delta=charge_max_period)
-    kpi_cols[7].metric("전체기간 충전액 최저", charge_min_value, delta=charge_min_period)
+    kpi_cols[4].metric("전체기간 사용액 :red[최고]", use_max_value, delta=use_max_period)
+    kpi_cols[5].metric("전체기간 사용액 :blue[최저]", use_min_value, delta=use_min_period)
+    kpi_cols[6].metric("전체기간 충전액 :red[최고]", charge_max_value, delta=charge_max_period)
+    kpi_cols[7].metric("전체기간 충전액 :blue[최저]", charge_min_value, delta=charge_min_period)
 
     amount_long = trend.melt(
         id_vars=["period_key", "period_date"],
@@ -797,6 +797,92 @@ with tab_sigun:
         st.info("월별 추이를 볼 시군을 선택해 주세요.")
     else:
         sigun_trend_yoy = add_yoy_columns(sigun_trend.sort_values("period_date").copy())
+        sigun_trend_yoy["use_to_charge_rate"] = (
+            sigun_trend_yoy["use_amount_million"]
+            / sigun_trend_yoy["charge_amount_million"].where(sigun_trend_yoy["charge_amount_million"] != 0)
+            * 100
+        )
+        prev_sigun_ratio = sigun_trend_yoy["use_to_charge_rate"].shift(12)
+        sigun_trend_yoy["use_to_charge_rate_yoy_abs"] = sigun_trend_yoy["use_to_charge_rate"] - prev_sigun_ratio
+        sigun_trend_yoy["use_to_charge_rate_yoy_pct"] = (
+            sigun_trend_yoy["use_to_charge_rate_yoy_abs"] / prev_sigun_ratio.where(prev_sigun_ratio != 0) * 100
+        )
+        sigun_selected = sigun_trend_yoy[sigun_trend_yoy["period_key"] == selected_period].head(1)
+
+        sigun_new_members = float(sigun_selected["new_member_count"].iloc[0]) if not sigun_selected.empty else float("nan")
+        sigun_charge_million = (
+            float(sigun_selected["charge_amount_million"].iloc[0]) if not sigun_selected.empty else float("nan")
+        )
+        sigun_use_million = float(sigun_selected["use_amount_million"].iloc[0]) if not sigun_selected.empty else float("nan")
+        sigun_use_to_charge_rate = (
+            sigun_use_million / sigun_charge_million * 100
+            if not pd.isna(sigun_charge_million) and sigun_charge_million != 0
+            else float("nan")
+        )
+        sigun_charge_yoy_abs = (
+            float(sigun_selected["charge_amount_million_yoy_abs"].iloc[0]) if not sigun_selected.empty else float("nan")
+        )
+        sigun_charge_yoy_pct = (
+            float(sigun_selected["charge_amount_million_yoy_pct"].iloc[0]) if not sigun_selected.empty else float("nan")
+        )
+        sigun_use_yoy_abs = (
+            float(sigun_selected["use_amount_million_yoy_abs"].iloc[0]) if not sigun_selected.empty else float("nan")
+        )
+        sigun_use_yoy_pct = (
+            float(sigun_selected["use_amount_million_yoy_pct"].iloc[0]) if not sigun_selected.empty else float("nan")
+        )
+        sigun_new_member_yoy_abs = (
+            float(sigun_selected["new_member_count_yoy_abs"].iloc[0]) if not sigun_selected.empty else float("nan")
+        )
+        sigun_new_member_yoy_pct = (
+            float(sigun_selected["new_member_count_yoy_pct"].iloc[0]) if not sigun_selected.empty else float("nan")
+        )
+        sigun_use_to_charge_yoy_abs = (
+            float(sigun_selected["use_to_charge_rate_yoy_abs"].iloc[0]) if not sigun_selected.empty else float("nan")
+        )
+        sigun_use_to_charge_yoy_pct = (
+            float(sigun_selected["use_to_charge_rate_yoy_pct"].iloc[0]) if not sigun_selected.empty else float("nan")
+        )
+
+        sigun_use_max_value, sigun_use_max_period = period_extreme_text(sigun_trend_yoy, "use_amount_million", "max")
+        sigun_use_min_value, sigun_use_min_period = period_extreme_text(sigun_trend_yoy, "use_amount_million", "min")
+        sigun_charge_max_value, sigun_charge_max_period = period_extreme_text(
+            sigun_trend_yoy, "charge_amount_million", "max"
+        )
+        sigun_charge_min_value, sigun_charge_min_period = period_extreme_text(
+            sigun_trend_yoy, "charge_amount_million", "min"
+        )
+
+        sigun_kpi_cols = st.columns(8)
+        sigun_kpi_cols[0].metric(
+            "월별 신규가입자수",
+            "-" if pd.isna(sigun_new_members) else f"{sigun_new_members:,.0f}명",
+            delta=fmt_yoy_delta(sigun_new_member_yoy_abs, sigun_new_member_yoy_pct, is_count=True),
+        )
+        sigun_kpi_cols[1].metric(
+            "월별 충전액",
+            fmt_million_money(sigun_charge_million),
+            delta=fmt_yoy_delta(sigun_charge_yoy_abs, sigun_charge_yoy_pct),
+        )
+        sigun_kpi_cols[2].metric(
+            "월별 사용액",
+            fmt_million_money(sigun_use_million),
+            delta=fmt_yoy_delta(sigun_use_yoy_abs, sigun_use_yoy_pct),
+        )
+        sigun_kpi_cols[3].metric(
+            "사용액/충전액",
+            "-" if pd.isna(sigun_use_to_charge_rate) else f"{sigun_use_to_charge_rate:,.1f}%",
+            delta=(
+                "전년동월대비 없음"
+                if pd.isna(sigun_use_to_charge_yoy_abs) or pd.isna(sigun_use_to_charge_yoy_pct)
+                else f"{sigun_use_to_charge_yoy_abs:+,.1f}%p / {sigun_use_to_charge_yoy_pct:+,.1f}%"
+            ),
+        )
+        sigun_kpi_cols[4].metric("전체기간 사용액 :red[최고]", sigun_use_max_value, delta=sigun_use_max_period)
+        sigun_kpi_cols[5].metric("전체기간 사용액 :blue[최저]", sigun_use_min_value, delta=sigun_use_min_period)
+        sigun_kpi_cols[6].metric("전체기간 충전액 :red[최고]", sigun_charge_max_value, delta=sigun_charge_max_period)
+        sigun_kpi_cols[7].metric("전체기간 충전액 :blue[최저]", sigun_charge_min_value, delta=sigun_charge_min_period)
+
         sigun_x_scale = trend_x_scale(sigun_trend_yoy)
 
         st.altair_chart(
