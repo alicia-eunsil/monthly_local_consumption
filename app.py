@@ -457,7 +457,7 @@ with st.sidebar:
     sigun_options = sorted([x for x in operation["sigun_name"].dropna().unique() if x])
     selected_siguns = st.multiselect("시군", sigun_options, placeholder="전체")
 
-period_caption_placeholder.caption(f"기준 년월: {fmt_period_label(selected_period)} / 출처: 경기데이터드림")
+period_caption_placeholder.caption(f"기준년월: {fmt_period_label(selected_period)} / 출처: 경기데이터드림")
 
 filtered = operation.copy()
 if selected_siguns:
