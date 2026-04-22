@@ -306,6 +306,8 @@ def yoy_bar_line(
     title: str,
     amount_title: str,
     x_scale: alt.Scale | None = None,
+    pos_color: str = "#dc2626",
+    neg_color: str = "#2563eb",
 ):
     base = frame.dropna(subset=[amount_col]).copy()
     x_encoding = alt.X("period_date:T", title="기준월") if x_scale is None else alt.X("period_date:T", title="기준월", scale=x_scale)
@@ -317,8 +319,8 @@ def yoy_bar_line(
             y=alt.Y(f"{amount_col}:Q", title=amount_title),
             color=alt.condition(
                 f"datum['{amount_col}'] >= 0",
-                alt.value("#dc2626"),
-                alt.value("#2563eb"),
+                alt.value(pos_color),
+                alt.value(neg_color),
             ),
             tooltip=[
                 alt.Tooltip("period_key:N", title="기준년월"),
@@ -359,6 +361,8 @@ def render_monthly_trend_charts(trend: pd.DataFrame) -> None:
             "전년동월대비 사용액 추이",
             "증감액(백만원)",
             shared_x_scale,
+            pos_color="#b35c5c",
+            neg_color="#5e7ea8",
         ),
         use_container_width=True,
     )
@@ -376,6 +380,8 @@ def render_monthly_trend_charts(trend: pd.DataFrame) -> None:
             "전년동월대비 충전액 추이",
             "증감액(백만원)",
             shared_x_scale,
+            pos_color="#b35c5c",
+            neg_color="#5e7ea8",
         ),
         use_container_width=True,
     )
@@ -908,6 +914,8 @@ with tab_sigun:
                 "전년동월대비 사용액 추이",
                 "증감액(백만원)",
                 sigun_x_scale,
+                pos_color="#b35c5c",
+                neg_color="#5e7ea8",
             ),
             use_container_width=True,
         )
@@ -924,6 +932,8 @@ with tab_sigun:
                 "전년동월대비 충전액 추이",
                 "증감액(백만원)",
                 sigun_x_scale,
+                pos_color="#b35c5c",
+                neg_color="#5e7ea8",
             ),
             use_container_width=True,
         )
