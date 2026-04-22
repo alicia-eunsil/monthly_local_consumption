@@ -527,12 +527,12 @@ use_min_value, use_min_period = period_extreme_text(trend, "use_amount_million",
 charge_max_value, charge_max_period = period_extreme_text(trend, "charge_amount_million", "max")
 charge_min_value, charge_min_period = period_extreme_text(trend, "charge_amount_million", "min")
 
-tab_summary, tab_diag, tab_sigun = st.tabs(["경기도 현황", "진단", "시군별 현황"])
+tab_summary, tab_sigun, tab_diag = st.tabs(["경기도 현황", "시군별 현황", "진단"])
 
 st.caption(f"기준 년월: {fmt_period_label(selected_period)} / 출처: 경기데이터드림")
 
 with tab_summary:
-    kpi_cols = st.columns(4)
+    kpi_cols = st.columns(8)
     kpi_cols[0].metric(
         "월별 신규가입자수",
         "-" if pd.isna(total_new_members) else f"{total_new_members:,.0f}명",
@@ -557,11 +557,10 @@ with tab_summary:
             else f"{use_to_charge_yoy_abs:+,.1f}%p / {use_to_charge_yoy_pct:+,.1f}%"
         ),
     )
-    extreme_cols = st.columns(4)
-    extreme_cols[0].metric("전체기간 사용액 최고", use_max_value, delta=use_max_period)
-    extreme_cols[1].metric("전체기간 사용액 최저", use_min_value, delta=use_min_period)
-    extreme_cols[2].metric("전체기간 충전액 최고", charge_max_value, delta=charge_max_period)
-    extreme_cols[3].metric("전체기간 충전액 최저", charge_min_value, delta=charge_min_period)
+    kpi_cols[4].metric("전체기간 사용액 최고", use_max_value, delta=use_max_period)
+    kpi_cols[5].metric("전체기간 사용액 최저", use_min_value, delta=use_min_period)
+    kpi_cols[6].metric("전체기간 충전액 최고", charge_max_value, delta=charge_max_period)
+    kpi_cols[7].metric("전체기간 충전액 최저", charge_min_value, delta=charge_min_period)
 
     amount_long = trend.melt(
         id_vars=["period_key", "period_date"],
