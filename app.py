@@ -400,18 +400,17 @@ def render_monthly_trend_charts(trend: pd.DataFrame) -> None:
 
 require_access_code()
 
-service_info_help = (
-    "내용: 경기도 및 31개 시군별 지역화폐의 신규가입자수, 사용액, 충전액 추이(2024년부터 현재까지)\n"
-    "출처: 경기데이터드림\n"
-    "한계: 업종별, 성별, 연령별 데이터의 경우 최신데이터가 없어서 분석불가(최신월2021년 6월)\n"
-    "최종수정일 및 개발자: 2026년 4월 22일(데이터팀 임은실)"
-)
+service_info_help = """- 내용: 경기도 및 31개 시군별 지역화폐의 신규가입자수, 사용액, 충전액 추이(2024년부터 현재까지)
+- 출처: 경기데이터드림
+- 한계: 업종별, 성별, 연령별 데이터의 경우 최신데이터가 없어서 분석불가(최신월2021년 6월)
+- 최종수정일 및 개발자: 2026년 4월 22일(데이터팀 임은실)"""
 title_col, info_col = st.columns([8, 1])
 with title_col:
     st.title("경기도 지역화폐 발행·이용 현황")
 with info_col:
     st.button("ⓘ 안내", key="service_info_hover", help=service_info_help, type="secondary")
 st.caption("최신 월별 신규가입자수, 충전액, 사용액을 시군 단위로 확인합니다. (지역별 사용액, 충전액, 신규가입자수에 대해 최근일 기준 데이터 제공으로 분석에 한계 발생)")
+period_caption_placeholder = st.empty()
 
 with st.sidebar:
     st.subheader("데이터")
@@ -451,6 +450,8 @@ with st.sidebar:
 
     sigun_options = sorted([x for x in operation["sigun_name"].dropna().unique() if x])
     selected_siguns = st.multiselect("시군", sigun_options, placeholder="전체")
+
+period_caption_placeholder.caption(f"기준 년월: {fmt_period_label(selected_period)} / 출처: 경기데이터드림")
 
 filtered = operation.copy()
 if selected_siguns:
@@ -528,8 +529,6 @@ charge_max_value, charge_max_period = period_extreme_text(trend, "charge_amount_
 charge_min_value, charge_min_period = period_extreme_text(trend, "charge_amount_million", "min")
 
 tab_summary, tab_sigun, tab_diag = st.tabs(["경기도 현황", "시군별 현황", "진단"])
-
-st.caption(f"기준 년월: {fmt_period_label(selected_period)} / 출처: 경기데이터드림")
 
 with tab_summary:
     kpi_cols = st.columns(8)
