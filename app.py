@@ -779,7 +779,7 @@ with tab_sigun:
             "시군별 충전액 순위",
             "충전액(백만원)",
             31,
-            "#7c3aed",
+            "#8d7ab8",
         ),
         use_container_width=True,
     )
